@@ -158,6 +158,7 @@ typedef struct procstat_entry_s
 
 	unsigned long num_proc;
 	unsigned long num_lwp;
+	unsigned long num_fd;
 	unsigned long vmem_size;
 	unsigned long vmem_rss;
 	unsigned long vmem_data;
@@ -196,6 +197,7 @@ typedef struct procstat
 
 	unsigned long num_proc;
 	unsigned long num_lwp;
+	unsigned long num_fd;
 	unsigned long vmem_size;
 	unsigned long vmem_rss;
 	unsigned long vmem_data;
@@ -397,6 +399,7 @@ static void ps_list_add (const char *name, const char *cmdline, procstat_entry_t
 		pse->age = 0;
 		pse->num_proc   = entry->num_proc;
 		pse->num_lwp    = entry->num_lwp;
+		pse->num_fd     = entry->num_fd;;
 		pse->vmem_size  = entry->vmem_size;
 		pse->vmem_rss   = entry->vmem_rss;
 		pse->vmem_data  = entry->vmem_data;
@@ -411,6 +414,7 @@ static void ps_list_add (const char *name, const char *cmdline, procstat_entry_t
 
 		ps->num_proc   += pse->num_proc;
 		ps->num_lwp    += pse->num_lwp;
+		ps->num_fd     += pse->num_fd;
 		ps->vmem_size  += pse->vmem_size;
 		ps->vmem_rss   += pse->vmem_rss;
 		ps->vmem_data  += pse->vmem_data;
@@ -512,6 +516,7 @@ static void ps_list_reset (void)
 	{
 		ps->num_proc    = 0;
 		ps->num_lwp     = 0;
+		ps->num_fd      = 0;
 		ps->vmem_size   = 0;
 		ps->vmem_rss    = 0;
 		ps->vmem_data   = 0;
@@ -736,6 +741,14 @@ static void ps_submit_proc_list (procstat_t *ps)
 	vl.values_len = 2;
 	plugin_dispatch_values (&vl);
 
+	if (ps->num_fd != -1)
+	{
+		sstrncpy (vl.type, "files", sizeof (vl.type));
+		vl.values[0].gauge = ps->num_fd;
+		vl.values_len = 1;
+		plugin_dispatch_values (&vl);
+	}
+
 	sstrncpy (vl.type, "ps_pagefaults", sizeof (vl.type));
 	vl.values[0].derive = ps->vmem_minflt_counter;
 	vl.values[1].derive = ps->vmem_majflt_counter;
@@ -775,7 +788,7 @@ static void ps_submit_proc_list (procstat_t *ps)
 		plugin_dispatch_values (&vl);
 	}
 
-	DEBUG ("name = %s; num_proc = %lu; num_lwp = %lu; "
+	DEBUG ("name = %s; num_proc = %lu; num_lwp = %lu; num_fd = %lu; "
 			"vmem_size = %lu; vmem_rss = %lu; vmem_data = %lu; "
 			"vmem_code = %lu; "
 			"vmem_minflt_counter = %"PRIi64"; vmem_majflt_counter = %"PRIi64"; "
@@ -783,7 +796,7 @@ static void ps_submit_proc_list (procstat_t *ps)
 			"io_rchar = %"PRIi64"; io_wchar = %"PRIi64"; "
 			"io_syscr = %"PRIi64"; io_syscw = %"PRIi64"; "
 			"cswitch_vol = %"PRIi64"; cswitch_invol = %"PRIi64";",
-			ps->name, ps->num_proc, ps->num_lwp,
+			ps->name, ps->num_proc, ps->num_lwp, ps->num_fd,
 			ps->vmem_size, ps->vmem_rss,
 			ps->vmem_data, ps->vmem_code,
 			ps->vmem_minflt_counter, ps->vmem_majflt_counter,
@@ -907,6 +920,7 @@ static procstat_t *ps_read_status (int pid, procstat_t *ps)
 	unsigned long exe = 0;
 	unsigned long data = 0;
 	unsigned long threads = 0;
+	unsigned long files = 0;
 	char *fields[8];
 	int numfields;
 
@@ -920,7 +934,8 @@ static procstat_t *ps_read_status (int pid, procstat_t *ps)
 		char *endptr;
 
 		if (strncmp (buffer, "Vm", 2) != 0
-				&& strncmp (buffer, "Threads", 7) != 0)
+				&& strncmp (buffer, "Threads", 7) != 0
+				&& strncmp (buffer, "FDSize", 6) != 0)
 			continue;
 
 		numfields = strsplit (buffer, fields,
@@ -950,6 +965,10 @@ static procstat_t *ps_read_status (int pid, procstat_t *ps)
 			{
 				threads = tmp;
 			}
+			else if  (strncmp(buffer, "FDSize", 6) == 0)
+			{
+				files = tmp;
+			}
 		}
 	} /* while (fgets) */
 
@@ -964,6 +983,9 @@ static procstat_t *ps_read_status (int pid, procstat_t *ps)
 	ps->vmem_code = (exe + lib) * 1024;
 	if (threads != 0)
 		ps->num_lwp = threads;
+
+	if (files != 0)
+		ps->num_fd = files;
 
 	return (ps);
 } /* procstat_t *ps_read_vmem */
@@ -1422,6 +1444,11 @@ static int ps_read_process(long pid, procstat_t *ps, char *state)
 	ps->stack_size = myStatus->pr_stksize;
 
 	/*
+	 * TODO: File descriptor count for Solaris
+	 */
+	ps->num_fd = -1;
+
+	/*
 	 * Calculating input/ouput chars
 	 * Formula used is total chars / total blocks => chars/block
 	 * then convert input/output blocks to chars
@@ -1668,6 +1695,9 @@ static int ps_read (void)
 				pse.vmem_data = 0;
 				pse.vmem_code = 0;
 
+				/* File descriptor count not implemented */
+				pse.num_fd    = -1;
+
 				pse.vmem_minflt_counter = task_events_info.cow_faults;
 				pse.vmem_majflt_counter = task_events_info.faults;
 
@@ -1857,6 +1887,7 @@ static int ps_read (void)
 
 		pse.num_proc   = ps.num_proc;
 		pse.num_lwp    = ps.num_lwp;
+		pse.num_fd     = ps.num_fd;
 		pse.vmem_size  = ps.vmem_size;
 		pse.vmem_rss   = ps.vmem_rss;
 		pse.vmem_data  = ps.vmem_data;
@@ -2026,6 +2057,9 @@ static int ps_read (void)
 			pse.io_syscr = -1;
 			pse.io_syscw = -1;
 
+			/* file descriptor count not implemented */
+			pse.num_fd = -1;
+
 			ps_list_add (procs[i].ki_comm, have_cmdline ? cmdline : NULL, &pse);
 
 			switch (procs[i].ki_stat)
@@ -2161,6 +2195,9 @@ static int ps_read (void)
 
 			pse.cswitch_vol = -1;
 			pse.cswitch_invol = -1;
+
+			/* file descriptor count not implemented */
+			pse.num_fd = -1;
 
 			ps_list_add (procs[i].p_comm, have_cmdline ? cmdline : NULL, &pse);
 
@@ -2298,7 +2335,7 @@ static int ps_read (void)
 
 			pse.vmem_size = procentry[i].pi_tsize + procentry[i].pi_dvm * pagesize;
 			pse.vmem_rss = (procentry[i].pi_drss + procentry[i].pi_trss) * pagesize;
-			/* Not supported */
+			/* Not supported/implemented */
 			pse.vmem_data = 0;
 			pse.vmem_code = 0;
 			pse.stack_size =  0;
@@ -2307,6 +2344,8 @@ static int ps_read (void)
 			pse.io_wchar = -1;
 			pse.io_syscr = -1;
 			pse.io_syscw = -1;
+
+			pse.num_fd = -1;
 
 			ps_list_add (cmdline, cargs, &pse);
 		} /* for (i = 0 .. nprocs) */
@@ -2383,6 +2422,7 @@ static int ps_read (void)
 
 		pse.num_proc   = ps.num_proc;
 		pse.num_lwp    = ps.num_lwp;
+		pse.num_fd     = ps.num_fd;
 		pse.vmem_size  = ps.vmem_size;
 		pse.vmem_rss   = ps.vmem_rss;
 		pse.vmem_data  = ps.vmem_data;
