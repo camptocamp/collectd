@@ -726,7 +726,8 @@ static int mqtt_init (void)
         status = plugin_thread_create (&subscribers[i]->thread,
                 /* attrs = */ NULL,
                 /* func  = */ subscribers_thread,
-                /* args  = */ subscribers[i]);
+                /* args  = */ subscribers[i],
+                /* name  = */ "mqtt subscribe");
         if (status != 0)
         {
             char errbuf[1024];
