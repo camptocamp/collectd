@@ -3509,7 +3509,7 @@ static int network_init (void)
 		status = plugin_thread_create (&dispatch_thread_id,
 				NULL /* no attributes */,
 				dispatch_thread,
-				NULL /* no argument */);
+				NULL /* no argument */, "network dispatch");
 		if (status != 0)
 		{
 			char errbuf[1024];
@@ -3529,7 +3529,7 @@ static int network_init (void)
 		status = plugin_thread_create (&receive_thread_id,
 				NULL /* no attributes */,
 				receive_thread,
-				NULL /* no argument */);
+				NULL /* no argument */, "network recv");
 		if (status != 0)
 		{
 			char errbuf[1024];
