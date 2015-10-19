@@ -1603,8 +1603,9 @@ Collectd utilities
 %define _with_zookeeper --disable-zookeeper
 %endif
 
-%configure CFLAGS="%{optflags} -DLT_LAZY_OR_NOW=\"RTLD_LAZY|RTLD_GLOBAL\"" \
+%configure CFLAGS="%{optflags} \
 	--disable-static \
+	--enable-debug \
 	--without-included-ltdl \
 	--enable-all-plugins=yes \
 	--enable-match_empty_counter \
@@ -2373,6 +2374,19 @@ fi
 #- New plugins enabled by default: mqtt
 #- New plugins disabled by default: zone
 #
+* Mon Oct 19 2015 Marc Fournier <marc.fournier@camptocamp.com> 5.5.0-2
+- Custom build from current master
+- Added custom patches:
+  * #1308 openldap persistent connection + timeout
+  * #1293 read threads timing
+  * #1215 StoreRates for network plugin
+  * #1197 delay first plugin read
+  * #1109 nfs client stats
+  * #1107 write_tsdb with metadata
+  * #1105 write_http notifications
+  * #923 tcpconns per-connection stats
+  * #547 named threads
+  * #836 file descriptor count
 * Wed May 27 2015 Marc Fournier <marc.fournier@camptocamp.com> 5.5.0-1
 - New upstream version
 - New plugins enabled by default: ceph, drbd, log_logstash, write_tsdb, smart,
