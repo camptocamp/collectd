@@ -75,6 +75,9 @@
 #if HAVE_LINUX_INET_DIAG_H
 # include <linux/inet_diag.h>
 #endif
+# include <linux/rtnetlink.h>
+# include <netinet/tcp.h>
+# include <sys/socket.h>
 # include <arpa/inet.h>
 /* #endif KERNEL_LINUX */
 
@@ -266,12 +269,18 @@ static const char *config_keys[] =
   "ListeningPorts",
   "LocalPort",
   "RemotePort",
-  "AllPortsSummary"
+  "AllPortsSummary",
+  "ReportByPorts",
+  "ReportByConnections",
+  "ConnectionsAgeLimitSecs",
 };
 static int config_keys_num = STATIC_ARRAY_SIZE (config_keys);
 
 static int port_collect_listening = 0;
 static int port_collect_total = 0;
+static int report_by_connections = 0;
+static int report_by_ports = 1;
+static int connections_age_limit_msecs = -1;
 static port_entry_t *port_list_head = NULL;
 static uint32_t count_total[TCP_STATE_MAX + 1];
 
@@ -312,7 +321,7 @@ static void conn_submit_port_entry (port_entry_t *pe)
       || (pe->flags & PORT_COLLECT_LOCAL))
   {
     ssnprintf (vl.plugin_instance, sizeof (vl.plugin_instance),
-	"%"PRIu16"-local", pe->port);
+        "%"PRIu16"-local", pe->port);
 
     for (i = 1; i <= TCP_STATE_MAX; i++)
     {
@@ -327,7 +336,7 @@ static void conn_submit_port_entry (port_entry_t *pe)
   if (pe->flags & PORT_COLLECT_REMOTE)
   {
     ssnprintf (vl.plugin_instance, sizeof (vl.plugin_instance),
-	"%"PRIu16"-remote", pe->port);
+        "%"PRIu16"-remote", pe->port);
 
     for (i = 1; i <= TCP_STATE_MAX; i++)
     {
@@ -451,7 +460,7 @@ static int conn_handle_ports (uint16_t port_local, uint16_t port_remote, uint8_t
      )
   {
     NOTICE ("tcpconns plugin: Ignoring connection with "
-	"unknown state 0x%02"PRIx8".", state);
+        "unknown state 0x%02"PRIx8".", state);
     return (-1);
   }
 
@@ -480,6 +489,60 @@ static int conn_handle_ports (uint16_t port_local, uint16_t port_remote, uint8_t
 } /* int conn_handle_ports */
 
 #if KERNEL_LINUX
+
+#if HAVE_STRUCT_LINUX_INET_DIAG_REQ
+/* Return 1 if tcpi should be reported */
+static _Bool filter_tcpi(const struct tcp_info* tcpi)
+{
+  /* Skip last ACK sent, it's documented "Not remembered, sorry." */
+  return connections_age_limit_msecs < 0 ||
+      tcpi->tcpi_last_data_sent < connections_age_limit_msecs ||
+        /* tcpi->tcpi_last_ack_sent < connections_age_limit_msecs || */
+      tcpi->tcpi_last_data_recv < connections_age_limit_msecs ||
+      tcpi->tcpi_last_ack_recv < connections_age_limit_msecs;
+}
+
+/* Update entries for specified connections.  May call conn_buffer_flush. */
+static void conn_handle_tcpi(value_list_t *vl, uint8_t state,
+    const char src[], uint16_t sport, const char dst[], uint16_t dport,
+    const struct tcp_info* tcpi)
+{
+  char const *state_name = TCP_STATE_MIN <= state && state <= TCP_STATE_MAX
+    ? tcp_state[state]
+    : "UNKNOWN";
+
+  assert (vl->values != NULL);
+  snprintf(vl->type_instance, sizeof(vl->type_instance),
+      "%s:%"PRIu16"_%s:%"PRIu16"_%s",
+      src, sport, dst, dport, state_name);
+  /* tcpi_rtt appears to store microseconds; convert it to seconds. */
+  vl->values[0].gauge = 0.000001 * ((gauge_t) tcpi->tcpi_rtt);
+
+  plugin_dispatch_values (vl);
+} /* conn_handle_tcpi */
+
+/* Returns tcp_info in an rtattr in h. Returns NULL if all
+ * rtattr's scanned and no tcp_info found. h is assumed to hold at least
+ * enough bytes to hold INET_DIAG_INFO.*/
+static struct tcp_info *get_tcp_info(struct nlmsghdr *h)
+{
+  struct inet_diag_msg *r = NLMSG_DATA(h);
+  ssize_t remaining_len = h->nlmsg_len - NLMSG_LENGTH(sizeof(*r));
+  struct rtattr *attr = (struct rtattr*) (r + 1);
+
+  while (remaining_len > 0 && RTA_OK(attr, remaining_len))
+  {
+    if (attr->rta_type == INET_DIAG_INFO)
+      return RTA_DATA(attr);
+
+    attr = RTA_NEXT(attr, remaining_len);
+  }
+
+  return NULL;
+} /* get_tcp_info */
+
+#endif  /* HAVE_STRUCT_LINUX_INET_DIAG_REQ */
+
 /* Returns zero on success, less than zero on socket error and greater than
  * zero on other errors. */
 static int conn_read_netlink (void)
@@ -488,10 +551,17 @@ static int conn_read_netlink (void)
   int fd;
   struct sockaddr_nl nladdr;
   struct nlreq req;
-  struct msghdr msg;
-  struct iovec iov;
   struct inet_diag_msg *r;
-  char buf[8192];
+  char buf[32768];
+
+  value_t by_conn_value;
+  value_list_t by_conn_vl = VALUE_LIST_INIT;
+
+  sstrncpy (by_conn_vl.host, hostname_g, sizeof (by_conn_vl.host));
+  sstrncpy (by_conn_vl.plugin, "tcpconns", sizeof (by_conn_vl.plugin));
+  sstrncpy (by_conn_vl.type, "ping", sizeof (by_conn_vl.type));
+  by_conn_vl.values = &by_conn_value;
+  by_conn_vl.values_len = 1;
 
   /* If this fails, it's likely a permission problem. We'll fall back to
    * reading this information from files below. */
@@ -499,8 +569,8 @@ static int conn_read_netlink (void)
   if (fd < 0)
   {
     ERROR ("tcpconns plugin: conn_read_netlink: socket(AF_NETLINK, SOCK_RAW, "
-	"NETLINK_INET_DIAG) failed: %s",
-	sstrerror (errno, buf, sizeof (buf)));
+        "NETLINK_INET_DIAG) failed: %s",
+        sstrerror (errno, buf, sizeof (buf)));
     return (-1);
   }
 
@@ -520,49 +590,30 @@ static int conn_read_netlink (void)
    * message in case the system is/was out of memory. */
   req.nlh.nlmsg_seq = ++sequence_number;
   req.r.idiag_family = AF_INET;
-  req.r.idiag_states = 0xfff;
-  req.r.idiag_ext = 0;
+  req.r.idiag_states = 0xffff;
+  req.r.idiag_ext = 1 << (INET_DIAG_INFO - 1);
 
-  memset(&iov, 0, sizeof(iov));
-  iov.iov_base = &req;
-  iov.iov_len = sizeof(req);
-
-  memset(&msg, 0, sizeof(msg));
-  msg.msg_name = (void*)&nladdr;
-  msg.msg_namelen = sizeof(nladdr);
-  msg.msg_iov = &iov;
-  msg.msg_iovlen = 1;
-
-  if (sendmsg (fd, &msg, 0) < 0)
+  if (send (fd, &req, sizeof(req), /* flags = */ 0) < 0)
   {
-    ERROR ("tcpconns plugin: conn_read_netlink: sendmsg(2) failed: %s",
-	sstrerror (errno, buf, sizeof (buf)));
+    ERROR ("tcpconns plugin: conn_read_netlink: send(2) failed: %s",
+        sstrerror (errno, buf, sizeof (buf)));
     close (fd);
     return (-1);
   }
-
-  iov.iov_base = buf;
-  iov.iov_len = sizeof(buf);
 
   while (1)
   {
     int status;
     struct nlmsghdr *h;
 
-    memset(&msg, 0, sizeof(msg));
-    msg.msg_name = (void*)&nladdr;
-    msg.msg_namelen = sizeof(nladdr);
-    msg.msg_iov = &iov;
-    msg.msg_iovlen = 1;
-
-    status = recvmsg(fd, (void *) &msg, /* flags = */ 0);
+    status = recv(fd, buf, sizeof(buf), /* flags = */ 0);
     if (status < 0)
     {
       if ((errno == EINTR) || (errno == EAGAIN))
         continue;
 
-      ERROR ("tcpconns plugin: conn_read_netlink: recvmsg(2) failed: %s",
-	  sstrerror (errno, buf, sizeof (buf)));
+      ERROR ("tcpconns plugin: conn_read_netlink: recv(2) failed: %s",
+          sstrerror (errno, buf, sizeof (buf)));
       close (fd);
       return (-1);
     }
@@ -570,7 +621,8 @@ static int conn_read_netlink (void)
     {
       close (fd);
       DEBUG ("tcpconns plugin: conn_read_netlink: Unexpected zero-sized "
-	  "reply from netlink socket.");
+          "reply from netlink socket.");
+      close (fd);
       return (0);
     }
 
@@ -579,43 +631,70 @@ static int conn_read_netlink (void)
     {
       if (h->nlmsg_seq != sequence_number)
       {
-	h = NLMSG_NEXT(h, status);
-	continue;
+        INFO ("tcpconns plugin: conn_read_netlink: sequence numbers mismatch "
+            "received %u != expected %u",
+            h->nlmsg_seq, sequence_number);
+        h = NLMSG_NEXT(h, status);
+        continue;
       }
 
       if (h->nlmsg_type == NLMSG_DONE)
       {
-	close (fd);
-	return (0);
+        close (fd);
+        return (0);
       }
       else if (h->nlmsg_type == NLMSG_ERROR)
       {
-	struct nlmsgerr *msg_error;
+        struct nlmsgerr *msg_error;
 
-	msg_error = NLMSG_DATA(h);
-	WARNING ("tcpconns plugin: conn_read_netlink: Received error %i.",
-	    msg_error->error);
+        msg_error = NLMSG_DATA(h);
+        WARNING ("tcpconns plugin: conn_read_netlink: Received error %i.",
+            msg_error->error);
 
-	close (fd);
-	return (1);
+        close (fd);
+        return (1);
       }
 
+      /* TODO(arielshaqed): Fix: Check data length around NLMSG_DATA()! */
       r = NLMSG_DATA(h);
+      {
+        u_int8_t state = r->idiag_state;
+        unsigned short sport = ntohs(r->id.idiag_sport);
+        unsigned short dport = ntohs(r->id.idiag_dport);
 
-      /* This code does not (need to) distinguish between IPv4 and IPv6. */
-      conn_handle_ports (ntohs(r->id.idiag_sport),
-	  ntohs(r->id.idiag_dport),
-	  r->idiag_state);
+        /* This code does not (need to) distinguish between IPv4 and IPv6. */
+        if (report_by_ports)
+          conn_handle_ports (sport, dport, state);
+
+        if (report_by_connections)
+        {
+          struct tcp_info *tcpi = get_tcp_info(h);
+
+          if ((r->idiag_state != TCP_STATE_LISTEN) && (tcpi != NULL) && filter_tcpi (tcpi))
+          {
+            char src[INET6_ADDRSTRLEN];
+            char dst[INET6_ADDRSTRLEN];
+
+            if (!inet_ntop(r->idiag_family, r->id.idiag_src, src, sizeof(src)))
+              strncpy(src, "<UNKNOWN>", sizeof(src));
+            if (!inet_ntop(r->idiag_family, r->id.idiag_dst, dst, sizeof(dst)))
+              strncpy(dst, "<UNKNOWN>", sizeof(dst));
+
+            conn_handle_tcpi (&by_conn_vl, r->idiag_state, src, sport, dst, dport, tcpi);
+          }
+        }
+      }
 
       h = NLMSG_NEXT(h, status);
     } /* while (NLMSG_OK) */
   } /* while (1) */
 
   /* Not reached because the while() loop above handles the exit condition. */
+  close(fd);
   return (0);
 #else
   return (1);
-#endif /* HAVE_STRUCT_LINUX_INET_DIAG_REQ */
+#endif  /* HAVE_STRUCT_LINUX_INET_DIAG_REQ */
 } /* int conn_read_netlink */
 
 static int conn_handle_line (char *buffer)
@@ -712,26 +791,26 @@ static int conn_config (const char *key, const char *value)
   else if ((strcasecmp (key, "LocalPort") == 0)
       || (strcasecmp (key, "RemotePort") == 0))
   {
-      port_entry_t *pe;
-      int port = atoi (value);
+    port_entry_t *pe;
+    int port = atoi (value);
 
-      if ((port < 1) || (port > 65535))
-      {
-	ERROR ("tcpconns plugin: Invalid port: %i", port);
-	return (1);
-      }
+    if ((port < 1) || (port > 65535))
+    {
+      ERROR ("tcpconns plugin: Invalid port: %i", port);
+      return (1);
+    }
 
-      pe = conn_get_port_entry ((uint16_t) port, 1 /* create */);
-      if (pe == NULL)
-      {
-	ERROR ("tcpconns plugin: conn_get_port_entry failed.");
-	return (1);
-      }
+    pe = conn_get_port_entry ((uint16_t) port, 1 /* create */);
+    if (pe == NULL)
+    {
+      ERROR ("tcpconns plugin: conn_get_port_entry failed.");
+      return (1);
+    }
 
-      if (strcasecmp (key, "LocalPort") == 0)
-	pe->flags |= PORT_COLLECT_LOCAL;
-      else
-	pe->flags |= PORT_COLLECT_REMOTE;
+    if (strcasecmp (key, "LocalPort") == 0)
+      pe->flags |= PORT_COLLECT_LOCAL;
+    else
+      pe->flags |= PORT_COLLECT_REMOTE;
   }
   else if (strcasecmp (key, "AllPortsSummary") == 0)
   {
@@ -739,6 +818,27 @@ static int conn_config (const char *key, const char *value)
       port_collect_total = 1;
     else
       port_collect_total = 0;
+  }
+  else if (strcasecmp (key, "ReportByConnections") == 0)
+  {
+    if (IS_TRUE (value)) {
+      report_by_connections = 1;
+#if !(KERNEL_LINUX && HAVE_STRUCT_LINUX_INET_DIAG_REQ)
+      ERROR ("tcpconns plugin: Platform does not support ReportByConnections.");
+#endif
+    }
+    else
+      report_by_connections = 0;
+  }
+  else if (strcasecmp (key, "ReportByPorts") == 0)
+  {
+    if (IS_TRUE (value))
+      report_by_ports = 1;
+    else
+      report_by_ports = 0;
+  }
+  else if (strcasecmp (key, "ConnectionsAgeLimitSecs") == 0) {
+    connections_age_limit_msecs = atof(value) * 1000;
   }
   else
   {
@@ -789,14 +889,17 @@ static int conn_read (void)
     if (status == 0)
     {
       INFO ("tcpconns plugin: Reading from netlink succeeded. "
-	  "Will use the netlink method from now on.");
+          "Will use the netlink method from now on.");
       linux_source = SRC_NETLINK;
     }
     else
     {
       INFO ("tcpconns plugin: Reading from netlink failed. "
-	  "Will read from /proc from now on.");
+          "Will read from /proc from now on.");
       linux_source = SRC_PROC;
+      if (report_by_connections)
+        ERROR ("tcpconns plugin: "
+            "Ignore ReportByConnections (not reading Netlink inet_diag)");
 
       /* return success here to avoid the "plugin failed" message. */
       return (0);
@@ -872,11 +975,11 @@ static int conn_read (void)
       continue;
 
     if (((inp->inp_vflag & INP_IPV4) == 0)
-	&& ((inp->inp_vflag & INP_IPV6) == 0))
+        && ((inp->inp_vflag & INP_IPV6) == 0))
       continue;
 
     conn_handle_ports (ntohs (inp->inp_lport), ntohs (inp->inp_fport),
-	tp->t_state);
+        tp->t_state);
   } /* for (in_ptr) */
 
   in_orig = NULL;
@@ -898,7 +1001,7 @@ static int kread (u_long addr, void *buf, int size)
   if (status != size)
   {
     ERROR ("tcpconns plugin: kvm_read failed (got %i, expected %i): %s\n",
-	status, size, kvm_geterr (kvmd));
+        status, size, kvm_geterr (kvmd));
     return (-1);
   }
   return (0);
@@ -932,7 +1035,7 @@ static int conn_init (void)
   if (nl[N_TCBTABLE].n_type == 0)
   {
     ERROR ("tcpconns plugin: Error looking up kernel's namelist: "
-	"N_TCBTABLE is invalid.");
+        "N_TCBTABLE is invalid.");
     return (-1);
   }
 
@@ -966,8 +1069,8 @@ static int conn_read (void)
   next = (struct inpcb *)TAILQ_FIRST (&table.inpt_queue);
   while (next)
 #else
-  /* Get the `head' pcb */
-  head = (struct inpcb *) &(inpcbtable_ptr->inpt_queue);
+    /* Get the `head' pcb */
+    head = (struct inpcb *) &(inpcbtable_ptr->inpt_queue);
   /* Get the first pcb */
   next = (struct inpcb *)CIRCLEQ_FIRST (&table.inpt_queue);
 
@@ -993,10 +1096,10 @@ static int conn_read (void)
       continue; /* XXX see netbsd/src/usr.bin/netstat/inet6.c */
 #else
     if (!(inpcb.inp_flags & INP_IPV6)
-	&& (inet_lnaof(inpcb.inp_laddr) == INADDR_ANY))
+        && (inet_lnaof(inpcb.inp_laddr) == INADDR_ANY))
       continue;
     if ((inpcb.inp_flags & INP_IPV6)
-	&& IN6_IS_ADDR_UNSPECIFIED (&inpcb.inp_laddr6))
+        && IN6_IS_ADDR_UNSPECIFIED (&inpcb.inp_laddr6))
       continue;
 #endif
 
@@ -1074,18 +1177,18 @@ static int conn_read (void)
 
 void module_register (void)
 {
-	plugin_register_config ("tcpconns", conn_config,
-			config_keys, config_keys_num);
+  plugin_register_config ("tcpconns", conn_config,
+      config_keys, config_keys_num);
 #if KERNEL_LINUX
-	plugin_register_init ("tcpconns", conn_init);
+  plugin_register_init ("tcpconns", conn_init);
 #elif HAVE_SYSCTLBYNAME
-	/* no initialization */
+  /* no initialization */
 #elif HAVE_LIBKVM_NLIST
-	plugin_register_init ("tcpconns", conn_init);
+  plugin_register_init ("tcpconns", conn_init);
 #elif KERNEL_AIX
-	/* no initialization */
+  /* no initialization */
 #endif
-	plugin_register_read ("tcpconns", conn_read);
+  plugin_register_read ("tcpconns", conn_read);
 } /* void module_register */
 
 /*
