@@ -1603,7 +1603,7 @@ Collectd utilities
 %define _with_zookeeper --disable-zookeeper
 %endif
 
-%configure CFLAGS="%{optflags} \
+%configure CFLAGS="%{optflags}" \
 	--disable-static \
 	--enable-debug \
 	--without-included-ltdl \
