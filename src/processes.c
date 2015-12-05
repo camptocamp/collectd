@@ -733,7 +733,7 @@ static void ps_submit_proc_list (procstat_t *ps)
 	vl.values_len = 2;
 	plugin_dispatch_values (&vl);
 
-	if (ps->num_fd != -1)
+	if (ps->num_fd > 0)
 	{
 		sstrncpy (vl.type, "files", sizeof (vl.type));
 		vl.values[0].gauge = ps->num_fd;
@@ -1124,8 +1124,8 @@ static int ps_read_process (long pid, procstat_t *ps, char *state)
 		if ((ps_read_status(pid, ps)) == NULL)
 		{
 			/* No VMem data */
-			ps->vmem_data = -1;
-			ps->vmem_code = -1;
+			ps->vmem_data = 0;
+			ps->vmem_code = 0;
 			DEBUG("ps_read_process: did not get vmem data for pid %li", pid);
 		}
 		if (ps->num_lwp == 0)
@@ -1429,14 +1429,14 @@ static int ps_read_process(long pid, procstat_t *ps, char *state)
 	 * TODO: Data and code segment calculations for Solaris
 	 */
 
-	ps->vmem_data = -1;
-	ps->vmem_code = -1;
+	ps->vmem_data = 0;
+	ps->vmem_code = 0;
 	ps->stack_size = myStatus->pr_stksize;
 
 	/*
 	 * TODO: File descriptor count for Solaris
 	 */
-	ps->num_fd = -1;
+	ps->num_fd = 0;
 
 	/*
 	 * Calculating input/ouput chars
@@ -1692,7 +1692,7 @@ static int ps_read (void)
 				pse.vmem_code = 0;
 
 				/* File descriptor count not implemented */
-				pse.num_fd    = -1;
+				pse.num_fd    = 0;
 
 				pse.vmem_minflt_counter = task_events_info.cow_faults;
 				pse.vmem_majflt_counter = task_events_info.faults;
@@ -2060,7 +2060,7 @@ static int ps_read (void)
 			/* context switch counters not implemented */
 			pse.cswitch_vol   = -1;
 			pse.cswitch_invol = -1;
-			pse.num_fd = -1;
+			pse.num_fd = 0;
 
 			ps_list_add (procs[i].ki_comm, have_cmdline ? cmdline : NULL, &pse);
 
@@ -2200,7 +2200,7 @@ static int ps_read (void)
 			pse.cswitch_invol = -1;
 
 			/* file descriptor count not implemented */
-			pse.num_fd = -1;
+			pse.num_fd = 0;
 
 			ps_list_add (procs[i].p_comm, have_cmdline ? cmdline : NULL, &pse);
 
@@ -2350,7 +2350,7 @@ static int ps_read (void)
 
 			pse.cswitch_vol   = -1;
 			pse.cswitch_invol = -1;
-			pse.num_fd = -1;
+			pse.num_fd = 0;
 
 			ps_list_add (cmdline, cargs, &pse);
 		} /* for (i = 0 .. nprocs) */
