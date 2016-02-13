@@ -156,6 +156,8 @@ static int riemann_connect(struct riemann_host *host) /* {{{ */
 			continue;
 		}
 
+		set_sock_opts(host->s);
+
 		if (connect(host->s, ai->ai_addr, ai->ai_addrlen) != 0) {
 			close(host->s);
 			host->s = -1;
