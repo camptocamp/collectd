@@ -1129,8 +1129,8 @@ static int ps_read_process (long pid, procstat_t *ps, char *state)
 		if ((ps_read_status(pid, ps)) == NULL)
 		{
 			/* No VMem data */
-			ps->vmem_data = -1;
-			ps->vmem_code = -1;
+			ps->vmem_data = 0;
+			ps->vmem_code = 0;
 			DEBUG("ps_read_process: did not get vmem data for pid %li", pid);
 		}
 		if (ps->num_lwp == 0)
