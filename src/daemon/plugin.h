@@ -38,7 +38,7 @@
 #define PLUGIN_FLAGS_GLOBAL 0x0001
 
 #ifndef DATA_MAX_NAME_LEN
-# define DATA_MAX_NAME_LEN 64
+# define DATA_MAX_NAME_LEN 512
 #endif
 
 #define DS_TYPE_COUNTER  0
@@ -457,7 +457,7 @@ cdtime_t plugin_get_interval (void);
  */
 
 int plugin_thread_create (pthread_t *thread, const pthread_attr_t *attr,
-		void *(*start_routine) (void *), void *arg);
+		void *(*start_routine) (void *), void *arg, char *name);
 
 /*
  * Plugins need to implement this

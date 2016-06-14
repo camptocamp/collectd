@@ -335,6 +335,17 @@ Configure the name of the "pre-cache chain" and the "post-cache chain". Please
 see L<FILTER CONFIGURATION> below on information on chains and how these
 setting change the daemon's behavior.
 
+=item B<SyncNodesReads> B<true|false>
+
+This parameter can be used to synchronize the plugin reads among multiple nodes
+on a cluster setup. When set to B<true>, the first plugin reads are delayed to
+the beginning of the next read interval. This way, if the system clocks of the
+nodes are synchronized (using NTP or similar) and the read intervals are
+equal, the plugin reads are also naturally synchronized among these nodes.
+
+The default value is B<false>. The first plugin reads are scheduled as soon as
+possible on collectd start.
+
 =back
 
 =head1 PLUGIN OPTIONS
@@ -4528,6 +4539,62 @@ statistics available. Defaults to B<false>.
 
 =back
 
+=head2 Plugin C<nfs>
+
+This plugin collects statistics about NFS (client and server).
+
+The configuration options can be used to have a specific configuration
+of what to collect from /proc/self/mountstat.
+
+Example :
+
+ <Plugin "nfs">
+   EnableClientStatsPerMountpoint <true|false>
+   <Mountpoint "all">
+     MinAge 3600
+     Enable true
+   </Mountpoint>
+   <Mountpoint "/mnt">
+     Enable false
+   </Mountpoint>
+   <Mountpoint "/mynfsmountpoints/data1">
+     MinAge 0
+     Enable true
+   </Mountpoint>
+   <Mountpoint "/mynfsmountpoints/data2">
+     MinAge 0
+     Enable true
+   </Mountpoint>
+ </Plugin>
+
+The following options are accepted by the C<nfs plugin>:
+
+=over 4
+
+=item B<EnableClientStatsPerMountpoint> I<boolean>
+
+Enable collecting statistics from /proc/self/mountstats (if available).
+
+=item B<Mountpoint> I<mountpoint>
+
+This starts a block with options for I<mountpoint>. If I<mountpoint> is "all",
+the options are defined for all mountpoints unless redefined with other B<mountpoint>
+blocks.
+
+=over 4
+
+=item B<Enable> B<true|false>
+
+Enable or not this mountpoint.
+
+=item B<MinAge> I<seconds>
+
+Ignore mountpoint unless its age is more than I<seconds>. Do not ignore if set to 0.
+
+=back
+
+=back
+
 =head2 Plugin C<nginx>
 
 This plugin collects the number of connections and requests handled by the
@@ -5864,7 +5931,7 @@ C<I<prefix>/var/run/collectd-powerdns>.
 Select more detailed statistics of processes matching this name. The statistics
 collected for these selected processes are size of the resident segment size
 (RSS), user- and system-time used, number of processes and number of threads,
-io data (where available) and minor and major pagefaults.
+number of open files, io data (where available) and minor and major pagefaults.
 
 Some platforms have a limit on the length of process names. I<Name> must stay
 below this limit.

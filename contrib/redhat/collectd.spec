@@ -1664,8 +1664,9 @@ Collectd utilities
 %define _with_zookeeper --disable-zookeeper
 %endif
 
-%configure CFLAGS="%{optflags} -DLT_LAZY_OR_NOW=\"RTLD_LAZY|RTLD_GLOBAL\"" \
+%configure CFLAGS="%{optflags}" \
 	--disable-static \
+	--enable-debug \
 	--without-included-ltdl \
 	--enable-all-plugins=yes \
 	--enable-match_empty_counter \
@@ -2445,10 +2446,20 @@ fi
 %doc contrib/
 
 %changelog
-* Sat Jun 04 2016 Ruben Kerkhof <ruben@rubenkerkhof.com> 5.5.1-1
-- New upstream version
-- New plugins enabled by default: chrony, mqtt, notify_nagios
-- New plugins disabled by default: grpc, zone, xencpu
+#* TODO: next feature release changelog
+#- New upstream version
+#- New plugins enabled by default: chrony, mqtt, notify_nagios
+#- New plugins disabled by default: grpc, zone, xencpu
+#
+* Fri Jan 15 2016 Marc Fournier <marc.fournier@camptocamp.com> 5.5.0-3
+- Custom build from current master
+- Bump DATA_MAX_NAME_LEN to 512
+- Added custom patches:
+  * #1215 StoreRates for network plugin
+  * #1197 delay first plugin read
+  * #1109 nfs client stats
+  * #547 named threads
+  * #836 file descriptor count
 
 * Wed May 27 2015 Marc Fournier <marc.fournier@camptocamp.com> 5.5.0-1
 - New upstream version

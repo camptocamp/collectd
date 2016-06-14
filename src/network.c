@@ -278,6 +278,7 @@ static int network_config_ttl = 0;
 static size_t network_config_packet_size = 1452;
 static _Bool network_config_forward = 0;
 static _Bool network_config_stats = 0;
+static _Bool network_store_rates = 0;
 
 static sockent_t *sending_sockets = NULL;
 
@@ -602,6 +603,7 @@ static int write_part_values (char **ret_buffer, int *ret_buffer_len,
 	uint16_t      pkg_num_values;
 	uint8_t      *pkg_values_types;
 	value_t      *pkg_values;
+	gauge_t      *rates = NULL;
 
 	int offset;
 	int i;
@@ -637,32 +639,49 @@ static int write_part_values (char **ret_buffer, int *ret_buffer_len,
 	for (i = 0; i < num_values; i++)
 	{
 		pkg_values_types[i] = (uint8_t) ds->ds[i].type;
-		switch (ds->ds[i].type)
+		if (network_store_rates)
 		{
-			case DS_TYPE_COUNTER:
-				pkg_values[i].counter = htonll (vl->values[i].counter);
-				break;
-
-			case DS_TYPE_GAUGE:
-				pkg_values[i].gauge = htond (vl->values[i].gauge);
-				break;
-
-			case DS_TYPE_DERIVE:
-				pkg_values[i].derive = htonll (vl->values[i].derive);
-				break;
-
-			case DS_TYPE_ABSOLUTE:
-				pkg_values[i].absolute = htonll (vl->values[i].absolute);
-				break;
-
-			default:
-				free (pkg_values_types);
-				free (pkg_values);
-				ERROR ("network plugin: write_part_values: "
-						"Unknown data source type: %i",
-						ds->ds[i].type);
+			if (rates == NULL)
+				rates = uc_get_rate (ds,vl);
+			if (rates == NULL)
+			{
+				WARNING ("network plugin: "
+					"uc_get_rate failed.");
 				return (-1);
-		} /* switch (ds->ds[i].type) */
+			}
+			else
+			{
+				pkg_values[i].gauge = htond (rates[i]);
+				pkg_values_types[i] = DS_TYPE_GAUGE;
+			}
+		}
+		else
+			switch (ds->ds[i].type)
+			{
+				case DS_TYPE_COUNTER:
+					pkg_values[i].counter = htonll (vl->values[i].counter);
+					break;
+
+				case DS_TYPE_GAUGE:
+					pkg_values[i].gauge = htond (vl->values[i].gauge);
+					break;
+
+				case DS_TYPE_DERIVE:
+					pkg_values[i].derive = htonll (vl->values[i].derive);
+					break;
+
+				case DS_TYPE_ABSOLUTE:
+					pkg_values[i].absolute = htonll (vl->values[i].absolute);
+					break;
+
+				default:
+					free (pkg_values_types);
+					free (pkg_values);
+					ERROR ("network plugin: write_part_values: "
+							"Unknown data source type: %i",
+							ds->ds[i].type);
+					return (-1);
+			} /* switch (ds->ds[i].type) */
 	} /* for (num_values) */
 
 	/*
@@ -688,6 +707,7 @@ static int write_part_values (char **ret_buffer, int *ret_buffer_len,
 
 	free (pkg_values_types);
 	free (pkg_values);
+	free (rates);
 
 	return (0);
 } /* int write_part_values */
@@ -3228,6 +3248,8 @@ static int network_config (oconfig_item_t *ci) /* {{{ */
       cf_util_get_boolean (child, &network_config_forward);
     else if (strcasecmp ("ReportStats", child->key) == 0)
       cf_util_get_boolean (child, &network_config_stats);
+    else if (strcasecmp ("StoreRates", child->key) == 0)
+      cf_util_get_boolean (child, &network_store_rates);
     else
     {
       WARNING ("network plugin: Option `%s' is not allowed here.",
@@ -3482,7 +3504,7 @@ static int network_init (void)
 		status = plugin_thread_create (&dispatch_thread_id,
 				NULL /* no attributes */,
 				dispatch_thread,
-				NULL /* no argument */);
+				NULL /* no argument */, "network dispatch");
 		if (status != 0)
 		{
 			char errbuf[1024];
@@ -3502,7 +3524,7 @@ static int network_init (void)
 		status = plugin_thread_create (&receive_thread_id,
 				NULL /* no attributes */,
 				receive_thread,
-				NULL /* no argument */);
+				NULL /* no argument */, "network recv");
 		if (status != 0)
 		{
 			char errbuf[1024];

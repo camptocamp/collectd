@@ -25,6 +25,9 @@
  *   Sebastian Harl <sh at tokkee.org>
  **/
 
+/* _GNU_SOURCE is needed in Linux to use pthread_setname_np */
+#define _GNU_SOURCE 
+
 #include "collectd.h"
 #include "common.h"
 #include "plugin.h"
@@ -672,6 +675,17 @@ static void start_read_threads (int num)
 		if (pthread_create (read_threads + read_threads_num, NULL,
 					plugin_read_thread, NULL) == 0)
 		{
+#if defined(HAVE_PTHREAD_SETNAME_NP) || defined(HAVE_PTHREAD_SET_NAME_NP)
+			char thread_name[16];
+			sstrncpy (thread_name, "plugin reader", sizeof(thread_name));
+# if defined(HAVE_PTHREAD_SETNAME_NP)
+			pthread_setname_np (*(read_threads + read_threads_num),
+				thread_name);
+# elif defined(HAVE_PTHREAD_SET_NAME_NP)
+			pthread_set_name_np (*(read_threads + read_threads_num),
+				thread_name);
+# endif
+#endif
 			read_threads_num++;
 		}
 		else
@@ -897,9 +911,20 @@ static void start_write_threads (size_t num) /* {{{ */
 					"with status %i (%s).", status,
 					sstrerror (status, errbuf, sizeof (errbuf)));
 			return;
+		} else {
+#if defined(HAVE_PTHREAD_SETNAME_NP) || defined(HAVE_PTHREAD_SET_NAME_NP)
+			char thread_name[16];
+			sstrncpy (thread_name, "plugin writer", sizeof(thread_name));
+# if defined(HAVE_PTHREAD_SETNAME_NP)
+			pthread_setname_np (*(write_threads + write_threads_num),
+				thread_name);
+# elif defined(HAVE_PTHREAD_SET_NAME_NP)
+			pthread_set_name_np (*(write_threads + write_threads_num),
+				thread_name);
+# endif
+#endif
+			write_threads_num++;
 		}
-
-		write_threads_num++;
 	} /* for (i) */
 } /* }}} void start_write_threads */
 
@@ -1172,8 +1197,45 @@ static int plugin_insert_read (read_func_t *rf)
 {
 	int status;
 	llentry_t *le;
+	cdtime_t now = cdtime();
+	cdtime_t next_read = 0;
 
-	rf->rf_next_read = cdtime ();
+	if (IS_TRUE (global_option_get ("SyncNodesReads")))
+	{
+		/*
+		 * In order to kind of "synchronize" all collectd plugin reads
+		 * among various nodes, wait for the current interval to be
+		 * over. This way, if all nodes clocks are properly
+		 * synchronized (by NTP or so) and the read interval is the
+		 * same on all nodes, the read callbacks will hopefully happen
+		 * at (almost) the same time.
+		 *
+		 * To help understand the interval maths, here is an example
+		 * timeline:
+		 *
+		 *                                      interval
+		 *                            |------------------------->|
+		 * -+-------------------------+--------------------------+->
+		 *             ^              ^
+		 *             |---- wait --->|
+		 *            now           start
+		 *
+		 *  |--------->|------------->|
+		 *       i1            i2
+		 *
+		 * i1 = now % interval
+		 * i2 = interval - (now % interval)
+		 *
+		 * First read must be schedule at now + i2
+		 */
+		next_read = now + (rf->rf_interval - (now % rf->rf_interval));
+		DEBUG ("plugin %s first read is delayed to %f to sync with "
+                		"other nodes",
+                		rf->rf_name,
+				CDTIME_T_TO_DOUBLE(next_read));
+	} else
+		next_read = now;
+	rf->rf_next_read = next_read;
 	rf->rf_effective_interval = rf->rf_interval;
 
 	pthread_mutex_lock (&read_lock);
@@ -2849,9 +2911,10 @@ static void *plugin_thread_start (void *arg)
 } /* void *plugin_thread_start */
 
 int plugin_thread_create (pthread_t *thread, const pthread_attr_t *attr,
-		void *(*start_routine) (void *), void *arg)
+		void *(*start_routine) (void *), void *arg, char *name)
 {
 	plugin_thread_t *plugin_thread;
+	int ret;
 
 	plugin_thread = malloc (sizeof (*plugin_thread));
 	if (plugin_thread == NULL)
@@ -2861,8 +2924,22 @@ int plugin_thread_create (pthread_t *thread, const pthread_attr_t *attr,
 	plugin_thread->start_routine = start_routine;
 	plugin_thread->arg           = arg;
 
-	return pthread_create (thread, attr,
+	ret = pthread_create (thread, attr,
 			plugin_thread_start, plugin_thread);
+
+	if (ret == 0 && name != NULL) {
+#if defined(HAVE_PTHREAD_SETNAME_NP) || defined(HAVE_PTHREAD_SET_NAME_NP)
+		char thread_name[16];
+		sstrncpy (thread_name, name, sizeof(thread_name));
+# if defined(HAVE_PTHREAD_SETNAME_NP)
+		pthread_setname_np (*thread, thread_name);
+# elif defined(HAVE_PTHREAD_SET_NAME_NP)
+		pthread_set_name_np (*thread, thread_name);
+# endif
+#endif
+	}
+
+	return ret;
 } /* int plugin_thread_create */
 
 /* vim: set sw=8 ts=8 noet fdm=marker : */
