@@ -2460,6 +2460,7 @@ fi
   * #1109 nfs client stats
   * #547 named threads
   * #836 file descriptor count
+  * #1549 tcp keepalive
 
 * Wed May 27 2015 Marc Fournier <marc.fournier@camptocamp.com> 5.5.0-1
 - New upstream version
