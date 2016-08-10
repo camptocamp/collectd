@@ -33,7 +33,6 @@
 
 #include <regex.h>
 
-#define UTILS_MATCH_FLAGS_FREE_USER_DATA 0x01
 #define UTILS_MATCH_FLAGS_EXCLUDE_REGEX 0x02
 
 struct cu_match_s
@@ -45,6 +44,7 @@ struct cu_match_s
   int (*callback) (const char *str, char * const *matches, size_t matches_num,
       void *user_data);
   void *user_data;
+  void (*free) (void *user_data);
 };
 
 /*
@@ -98,6 +98,13 @@ static int default_callback (const char __attribute__((unused)) *str,
     value = (gauge_t) strtod (matches[1], &endptr);
     if (matches[1] == endptr)
       return (-1);
+
+    if (data->ds_type & UTILS_MATCH_CF_GAUGE_LATENCY)
+    {
+      latency_counter_add(data->latency, DOUBLE_TO_CDTIME_T(value));
+      data->values_num++;
+      return (0);
+    }
 
     if ((data->values_num == 0)
 	|| (data->ds_type & UTILS_MATCH_CF_GAUGE_LAST))
@@ -225,13 +232,22 @@ static int default_callback (const char __attribute__((unused)) *str,
   return (0);
 } /* int default_callback */
 
+static void match_simple_free (void *data)
+{
+  cu_match_value_t *user_data = (cu_match_value_t *) data;
+  if (user_data->latency)
+    latency_counter_destroy(user_data->latency);
+
+  free (data);
+} /* void match_simple_free */
+
 /*
  * Public functions
  */
 cu_match_t *match_create_callback (const char *regex, const char *excluderegex,
 		int (*callback) (const char *str,
 		  char * const *matches, size_t matches_num, void *user_data),
-		void *user_data)
+		void *user_data, void (*free_user_data) (void *user_data))
 {
   cu_match_t *obj;
   int status;
@@ -265,6 +281,7 @@ cu_match_t *match_create_callback (const char *regex, const char *excluderegex,
 
   obj->callback = callback;
   obj->user_data = user_data;
+  obj->free = free_user_data;
 
   return (obj);
 } /* cu_match_t *match_create_callback */
@@ -280,16 +297,28 @@ cu_match_t *match_create_simple (const char *regex,
     return (NULL);
   user_data->ds_type = match_ds_type;
 
+  if ((match_ds_type & UTILS_MATCH_DS_TYPE_GAUGE)
+      && (match_ds_type & UTILS_MATCH_CF_GAUGE_LATENCY))
+  {
+    user_data->latency = latency_counter_create();
+    if (user_data->latency == NULL)
+    {
+      ERROR ("match_create_simple(): latency_counter_create() failed.");
+      free (user_data);
+      return (NULL);
+    }
+  }
+
   obj = match_create_callback (regex, excluderegex,
-			       default_callback, user_data);
+			       default_callback, user_data, match_simple_free);
   if (obj == NULL)
   {
+    if (user_data->latency)
+      latency_counter_destroy(user_data->latency);
+
     sfree (user_data);
     return (NULL);
   }
-
-  obj->flags |= UTILS_MATCH_FLAGS_FREE_USER_DATA;
-
   return (obj);
 } /* cu_match_t *match_create_simple */
 
@@ -310,10 +339,8 @@ void match_destroy (cu_match_t *obj)
   if (obj == NULL)
     return;
 
-  if (obj->flags & UTILS_MATCH_FLAGS_FREE_USER_DATA)
-  {
-    sfree (obj->user_data);
-  }
+  if ((obj->user_data != NULL) && (obj->free != NULL))
+      (*obj->free) (obj->user_data);
 
   sfree (obj);
 } /* void match_destroy */

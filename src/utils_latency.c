@@ -272,4 +272,79 @@ cdtime_t latency_counter_get_percentile (latency_counter_t *lc, /* {{{ */
   return (latency_interpolated);
 } /* }}} cdtime_t latency_counter_get_percentile */
 
+cdtime_t latency_counter_get_start_time (const latency_counter_t *lc) /* {{{ */
+{
+  if (lc == NULL)
+    return (0);
+
+  return lc->start_time;
+} /* }}} cdtime_t latency_counter_get_start_time */
+
+/*
+ * NAME
+ *  latency_counter_get_rate(counter,lower,upper,now)
+ *
+ * DESCRIPTION
+ *   Calculates rate of latency values fall within requested interval.
+ *   Interval specified as [lower,upper] (including boundaries).
+ *   When upper value is equal to 0 then interval is [lower, infinity).
+ */
+
+double latency_counter_get_rate (const latency_counter_t *lc, /* {{{ */
+        cdtime_t lower, cdtime_t upper, const cdtime_t now)
+{
+  cdtime_t lower_bin;
+  cdtime_t upper_bin;
+  double p;
+  double sum = 0;
+  size_t i;
+
+  if ((lc == NULL) || (lc->num == 0))
+    return (0);
+
+  if (lower < 1) {
+    //sum += lc->zero;
+    //lower = 1;
+    return (0);
+  }
+
+  if (upper && (upper < lower))
+    return (0);
+
+  /* A latency of _exactly_ 1.0 ms should be stored in the buffer 0 */
+  lower_bin = (lower - 1) / lc->bin_width;
+
+  if (upper)
+    upper_bin = (upper - 1) / lc->bin_width;
+  else
+    upper_bin = HISTOGRAM_NUM_BINS - 1;
+
+  if (lower_bin >= HISTOGRAM_NUM_BINS)
+    lower_bin = HISTOGRAM_NUM_BINS - 1;
+
+  if (upper_bin >= HISTOGRAM_NUM_BINS) {
+    upper_bin = HISTOGRAM_NUM_BINS - 1;
+    upper = 0;
+  }
+
+  sum = 0;
+  for (i = lower_bin; i <= upper_bin; i++)
+  {
+    sum += lc->histogram[i];
+  }
+
+  p = ((double)lower - (double)(lower_bin + 0) * (double)lc->bin_width - (double)DOUBLE_TO_CDTIME_T(0.001)) / (double)lc->bin_width;
+  sum -= p * lc->histogram[lower_bin];
+
+  if (upper && upper < (upper_bin + 1) * lc->bin_width)
+  {
+    // p = ((upper_bin + 1) * bin_width - upper ) / bin_width;
+    p = ((double)(upper_bin + 1) * (double)lc->bin_width - (double)upper) / (double)lc->bin_width;
+    sum -= p * lc->histogram[upper_bin];
+  }
+  return sum / (CDTIME_T_TO_DOUBLE (now - lc->start_time));
+
+} /* }}} double latency_counter_get_rate */
+
+
 /* vim: set sw=2 sts=2 et fdm=marker : */

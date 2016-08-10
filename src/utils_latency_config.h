@@ -1,6 +1,6 @@
 /**
- * collectd - src/utils_latency.h
- * Copyright (C) 2013       Florian Forster
+ * collectd - src/utils_latency_config.c
+ * Copyright (C) 2013-2016   Florian octo Forster
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -21,31 +21,41 @@
  * DEALINGS IN THE SOFTWARE.
  *
  * Authors:
- *   Florian Forster <ff at octo.it>
- **/
+ *   Florian octo Forster <octo at collectd.org>
+ *   Pavel Rochnyack <pavel2000 at ngs.ru>
+ */
+
+#ifndef UTILS_LATENCY_CONFIG_H
+#define UTILS_LATENCY_CONFIG_H 1
 
 #include "collectd.h"
-
 #include "utils_time.h"
 
-struct latency_counter_s;
-typedef struct latency_counter_s latency_counter_t;
+struct latency_config_s
+{
+  double *percentile;
+  size_t percentile_num;
+  char   *percentile_type;
+  cdtime_t *rates;
+  size_t   rates_num;
+  char     *rates_type;
+  _Bool lower;
+  _Bool upper;
+  //_Bool sum;
+  _Bool avg;
+  //_Bool count;
+};
+typedef struct latency_config_s latency_config_t;
 
-latency_counter_t *latency_counter_create (void);
-void latency_counter_destroy (latency_counter_t *lc);
 
-void latency_counter_add (latency_counter_t *lc, cdtime_t latency);
-void latency_counter_reset (latency_counter_t *lc);
+int latency_config_add_percentile (const char *plugin, latency_config_t *cl,
+    oconfig_item_t *ci);
 
-cdtime_t latency_counter_get_min (latency_counter_t *lc);
-cdtime_t latency_counter_get_max (latency_counter_t *lc);
-cdtime_t latency_counter_get_sum (latency_counter_t *lc);
-size_t   latency_counter_get_num (latency_counter_t *lc);
-cdtime_t latency_counter_get_average (latency_counter_t *lc);
-cdtime_t latency_counter_get_percentile (latency_counter_t *lc,
-    double percent);
-cdtime_t latency_counter_get_start_time (const latency_counter_t *lc);
-double latency_counter_get_rate (const latency_counter_t *lc,
-    cdtime_t lower, cdtime_t upper, const cdtime_t now);
+int latency_config_add_rate (const char *plugin, latency_config_t *cl,
+    oconfig_item_t *ci);
 
-/* vim: set sw=2 sts=2 et : */
+int latency_config_copy (latency_config_t *dst, const latency_config_t src);
+
+void latency_config_free (latency_config_t lc);
+
+#endif /* UTILS_LATENCY_CONFIG_H */
