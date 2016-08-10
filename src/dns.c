@@ -25,6 +25,7 @@
 #define _BSD_SOURCE
 
 #include "collectd.h"
+
 #include "common.h"
 #include "plugin.h"
 #include "configfile.h"
@@ -210,7 +211,7 @@ static int dns_run_pcap_loop (void)
 {
 	pcap_t *pcap_obj;
 	char    pcap_error[PCAP_ERRBUF_SIZE];
-	struct  bpf_program fp;
+	struct  bpf_program fp = { 0 };
 
 	int status;
 
@@ -237,7 +238,6 @@ static int dns_run_pcap_loop (void)
 		return (PCAP_ERROR);
 	}
 
-	memset (&fp, 0, sizeof (fp));
 	status = pcap_compile (pcap_obj, &fp, "udp port 53", 1, 0);
 	if (status < 0)
 	{
@@ -390,7 +390,6 @@ static int dns_read (void)
 	unsigned int keys[T_MAX];
 	unsigned int values[T_MAX];
 	int len;
-	int i;
 
 	counter_list_t *ptr;
 
@@ -412,7 +411,7 @@ static int dns_read (void)
 	}
 	pthread_mutex_unlock (&qtype_mutex);
 
-	for (i = 0; i < len; i++)
+	for (int i = 0; i < len; i++)
 	{
 		DEBUG ("dns plugin: qtype = %u; counter = %u;", keys[i], values[i]);
 		submit_derive ("dns_qtype", qtype_str (keys[i]), values[i]);
@@ -428,7 +427,7 @@ static int dns_read (void)
 	}
 	pthread_mutex_unlock (&opcode_mutex);
 
-	for (i = 0; i < len; i++)
+	for (int i = 0; i < len; i++)
 	{
 		DEBUG ("dns plugin: opcode = %u; counter = %u;", keys[i], values[i]);
 		submit_derive ("dns_opcode", opcode_str (keys[i]), values[i]);
@@ -444,7 +443,7 @@ static int dns_read (void)
 	}
 	pthread_mutex_unlock (&rcode_mutex);
 
-	for (i = 0; i < len; i++)
+	for (int i = 0; i < len; i++)
 	{
 		DEBUG ("dns plugin: rcode = %u; counter = %u;", keys[i], values[i]);
 		submit_derive ("dns_rcode", rcode_str (keys[i]), values[i]);

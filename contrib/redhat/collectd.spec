@@ -53,6 +53,7 @@
 %define with_contextswitch 0%{!?_without_contextswitch:1}
 %define with_cpu 0%{!?_without_cpu:1}
 %define with_cpufreq 0%{!?_without_cpufreq:1}
+%define with_cpusleep 0%{!?_without_cpusleep:1}
 %define with_csv 0%{!?_without_csv:1}
 %define with_curl 0%{!?_without_curl:1}
 %define with_curl_json 0%{!?_without_curl_json:1}
@@ -70,6 +71,7 @@
 %define with_filecount 0%{!?_without_filecount:1}
 %define with_fscache 0%{!?_without_fscache:1}
 %define with_gmond 0%{!?_without_gmond:1}
+%define with_gps 0%{!?_without_gps:1}
 %define with_hddtemp 0%{!?_without_hddtemp:1}
 %define with_interface 0%{!?_without_interface:1}
 %define with_ipc 0%{!?_without_ipc:1}
@@ -214,6 +216,8 @@
 
 # Plugins not buildable on RHEL < 7
 %if 0%{?rhel} && 0%{?rhel} < 7
+%define with_cpusleep 0
+%define with_gps 0
 %define with_mqtt 0
 %define with_rrdcached 0
 %define with_xmms 0
@@ -221,14 +225,14 @@
 
 Summary:	Statistics collection and monitoring daemon
 Name:		collectd
-Version:	5.5.1
+Version:	5.5.2
 Release:	1%{?dist}
-URL:		http://collectd.org
-Source:		http://collectd.org/files/%{name}-%{version}.tar.bz2
+URL:		https://collectd.org
+Source:		https://collectd.org/files/%{name}-%{version}.tar.bz2
 License:	GPLv2
 Group:		System Environment/Daemons
 BuildRoot:	%{_tmppath}/%{name}-%{version}-root
-BuildRequires:	libgcrypt-devel, kernel-headers, libtool-ltdl-devel, libcap-devel
+BuildRequires:	libgcrypt-devel, kernel-headers, libtool-ltdl-devel, libcap-devel, which
 Vendor:		collectd development team <collectd@verplant.org>
 
 %if 0%{?fedora} || 0%{?rhel} >= 7
@@ -414,6 +418,16 @@ BuildRequires:	ganglia-devel
 %description gmond
 The gmond plugin subscribes to a Multicast group to receive data from gmond,
 the client daemon of the Ganglia project.
+%endif
+
+%if %{with_gps}
+%package gps
+Summary:	GPS plugin for collectd
+Group:		System Environment/Daemons
+Requires:	%{name}%{?_isa} = %{version}-%{release}
+BuildRequires:	gpsd-devel
+%description gps
+This plugin monitor gps related data through gpsd.
 %endif
 
 %if %{with_grpc}
@@ -781,7 +795,7 @@ using HTTP POST requests.
 Summary:       Write-kafka plugin for collectd
 Group:         System Environment/Daemons
 Requires:      %{name}%{?_isa} = %{version}-%{release}
-BuildRequires: rdkafka-devel
+BuildRequires: librdkafka-devel
 %description write_kafka
 The write_kafka plugin sends values to kafka, a distributed messaging system.
 %endif
@@ -976,6 +990,12 @@ Collectd utilities
 %define _with_cpufreq --disable-cpufreq
 %endif
 
+%if %{with_cpusleep}
+%define _with_cpusleep --enable-cpusleep
+%else
+%define _with_cpusleep --disable-cpusleep
+%endif
+
 %if %{with_csv}
 %define _with_csv --enable-csv
 %else
@@ -1082,6 +1102,12 @@ Collectd utilities
 %define _with_gmond --enable-gmond
 %else
 %define _with_gmond --disable-gmond
+%endif
+
+%if %{with_gps}
+%define _with_gps --enable-gps
+%else
+%define _with_gps --disable-gps
 %endif
 
 %if %{with_grpc}
@@ -1387,6 +1413,7 @@ Collectd utilities
 %if %{with_python}
 	%if 0%{?rhel} && 0%{?rhel} < 6
 %define _with_python --enable-python --with-python=%{_bindir}/python2.6
+%define _python_config PYTHON_CONFIG="%{_bindir}/python2.6-config"
 	%else
 %define _with_python --enable-python
 	%endif
@@ -1664,7 +1691,8 @@ Collectd utilities
 %define _with_zookeeper --disable-zookeeper
 %endif
 
-%configure CFLAGS="%{optflags}" \
+%configure CFLAGS="%{optflags} -DLT_LAZY_OR_NOW=\"RTLD_LAZY|RTLD_GLOBAL\"" \
+	%{?_python_config} \
 	--disable-static \
 	--enable-debug \
 	--without-included-ltdl \
@@ -1695,6 +1723,7 @@ Collectd utilities
 	%{?_with_conntrack} \
 	%{?_with_contextswitch} \
 	%{?_with_cpufreq} \
+	%{?_with_cpusleep} \
 	%{?_with_cpu} \
 	%{?_with_csv} \
 	%{?_with_curl_json} \
@@ -1713,6 +1742,7 @@ Collectd utilities
 	%{?_with_filecount} \
 	%{?_with_fscache} \
 	%{?_with_gmond} \
+	%{?_with_gps} \
 	%{?_with_grpc} \
 	%{?_with_hddtemp} \
 	%{?_with_interface} \
@@ -1962,6 +1992,9 @@ fi
 %endif
 %if %{with_cpufreq}
 %{_libdir}/%{name}/cpufreq.so
+%endif
+%if %{with_cpusleep}
+%{_libdir}/%{name}/cpusleep.so
 %endif
 %if %{with_csv}
 %{_libdir}/%{name}/csv.so
@@ -2234,6 +2267,11 @@ fi
 %{_libdir}/%{name}/gmond.so
 %endif
 
+%if %{with_gps}
+%files gps
+%{_libdir}/%{name}/gps.so
+%endif
+
 %if %{with_grpc}
 %files grpc
 %{_libdir}/%{name}/grpc.so
@@ -2446,12 +2484,7 @@ fi
 %doc contrib/
 
 %changelog
-#* TODO: next feature release changelog
-#- New upstream version
-#- New plugins enabled by default: chrony, mqtt, notify_nagios
-#- New plugins disabled by default: grpc, zone, xencpu
-#
-* Fri Jan 15 2016 Marc Fournier <marc.fournier@camptocamp.com> 5.5.0-3
+* Wed Aug 10 2016 Marc Fournier <marc.fournier@camptocamp.com> 5.5.2-2
 - Custom build from current master
 - Bump DATA_MAX_NAME_LEN to 512
 - Added custom patches:
@@ -2461,6 +2494,16 @@ fi
   * #547 named threads
   * #836 file descriptor count
   * #1549 tcp keepalive
+
+* Tue Jul 26 2016 Ruben Kerkhof <ruben@rubenkerkhof.com> - 5.5.2-1
+- New upstream version
+- Contains fix for CVE-2016-6254
+- Change collectd.org url to https
+
+* Sat Jun 04 2016 Ruben Kerkhof <ruben@rubenkerkhof.com> 5.5.1-1
+- New upstream version
+- New plugins enabled by default: chrony, mqtt, notify_nagios
+- New plugins disabled by default: grpc, zone, xencpu
 
 * Wed May 27 2015 Marc Fournier <marc.fournier@camptocamp.com> 5.5.0-1
 - New upstream version

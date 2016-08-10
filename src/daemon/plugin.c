@@ -29,6 +29,7 @@
 #define _GNU_SOURCE 
 
 #include "collectd.h"
+
 #include "common.h"
 #include "plugin.h"
 #include "configfile.h"
@@ -321,8 +322,8 @@ static void log_list_callbacks (llist_t **list, /* {{{ */
 {
 	char *str;
 	int len;
-	llentry_t *le;
 	int i;
+	llentry_t *le;
 	int n;
 	char **keys;
 
@@ -657,8 +658,6 @@ static void *plugin_read_thread (void __attribute__((unused)) *args)
 
 static void start_read_threads (int num)
 {
-	int i;
-
 	if (read_threads != NULL)
 		return;
 
@@ -670,7 +669,7 @@ static void start_read_threads (int num)
 	}
 
 	read_threads_num = 0;
-	for (i = 0; i < num; i++)
+	for (int i = 0; i < num; i++)
 	{
 		if (pthread_create (read_threads + read_threads_num, NULL,
 					plugin_read_thread, NULL) == 0)
@@ -698,8 +697,6 @@ static void start_read_threads (int num)
 
 static void stop_read_threads (void)
 {
-	int i;
-
 	if (read_threads == NULL)
 		return;
 
@@ -711,7 +708,7 @@ static void stop_read_threads (void)
 	pthread_cond_broadcast (&read_cond);
 	pthread_mutex_unlock (&read_lock);
 
-	for (i = 0; i < read_threads_num; i++)
+	for (int i = 0; i < read_threads_num; i++)
 	{
 		if (pthread_join (read_threads[i], NULL) != 0)
 		{
@@ -883,8 +880,6 @@ static void *plugin_write_thread (void __attribute__((unused)) *args) /* {{{ */
 
 static void start_write_threads (size_t num) /* {{{ */
 {
-	size_t i;
-
 	if (write_threads != NULL)
 		return;
 
@@ -896,7 +891,7 @@ static void start_write_threads (size_t num) /* {{{ */
 	}
 
 	write_threads_num = 0;
-	for (i = 0; i < num; i++)
+	for (size_t i = 0; i < num; i++)
 	{
 		int status;
 
@@ -1001,7 +996,7 @@ static _Bool plugin_is_loaded (char const *name)
 	int status;
 
 	if (plugins_loaded == NULL)
-		plugins_loaded = c_avl_create ((void *) strcasecmp);
+		plugins_loaded = c_avl_create ((int (*) (const void *, const void *)) strcasecmp);
 	assert (plugins_loaded != NULL);
 
 	status = c_avl_get (plugins_loaded, name, /* ret_value = */ NULL);
@@ -1521,7 +1516,6 @@ static void plugin_free_data_sets (void)
 int plugin_register_data_set (const data_set_t *ds)
 {
 	data_set_t *ds_copy;
-	size_t i;
 
 	if ((data_sets != NULL)
 			&& (c_avl_get (data_sets, ds->type, NULL) == 0))
@@ -1549,7 +1543,7 @@ int plugin_register_data_set (const data_set_t *ds)
 		return (-1);
 	}
 
-	for (i = 0; i < ds->ds_num; i++)
+	for (size_t i = 0; i < ds->ds_num; i++)
 		memcpy (ds_copy->ds + i, ds->ds + i, sizeof (data_source_t));
 
 	return (c_avl_insert (data_sets, (void *) ds_copy->type, (void *) ds_copy));
@@ -2042,9 +2036,9 @@ int plugin_shutdown_all (void)
 	llentry_t *le;
 	int ret = 0;  // Assume success.
 
-	stop_read_threads ();
-
 	destroy_all_callbacks (&list_init);
+
+	stop_read_threads ();
 
 	pthread_mutex_lock (&read_lock);
 	llist_destroy (read_list);
@@ -2053,6 +2047,10 @@ int plugin_shutdown_all (void)
 
 	destroy_read_heap ();
 
+	/* blocks until all write threads have shut down. */
+	stop_write_threads ();
+
+	/* ask all plugins to write out the state they kept. */
 	plugin_flush (/* plugin = */ NULL,
 			/* timeout = */ 0,
 			/* identifier = */ NULL);
@@ -2082,8 +2080,6 @@ int plugin_shutdown_all (void)
 
 		plugin_set_ctx (old_ctx);
 	}
-
-	stop_write_threads ();
 
 	/* Write plugins which use the `user_data' pointer usually need the
 	 * same data available to the flush callback. If this is the case, set
@@ -2747,14 +2743,12 @@ int plugin_notification_meta_add_boolean (notification_t *n,
 int plugin_notification_meta_copy (notification_t *dst,
     const notification_t *src)
 {
-  notification_meta_t *meta;
-
   assert (dst != NULL);
   assert (src != NULL);
   assert (dst != src);
   assert ((src->meta == NULL) || (src->meta != dst->meta));
 
-  for (meta = src->meta; meta != NULL; meta = meta->next)
+  for (notification_meta_t *meta = src->meta; meta != NULL; meta = meta->next)
   {
     if (meta->type == NM_TYPE_STRING)
       plugin_notification_meta_add_string (dst, meta->name,

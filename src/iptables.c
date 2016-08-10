@@ -25,6 +25,7 @@
  **/
 
 #include "collectd.h"
+
 #include "common.h"
 #include "plugin.h"
 #include "configfile.h"
@@ -111,7 +112,8 @@ static int iptables_config (const char *key, const char *value)
     else
         return (1);
 
-    ip_chain_t temp, *final, **list;
+    ip_chain_t  temp = { 0 };
+    ip_chain_t *final, **list;
     char *table;
     int   table_len;
     char *chain;
@@ -120,8 +122,6 @@ static int iptables_config (const char *key, const char *value)
     char *value_copy;
     char *fields[4];
     int   fields_num;
-
-    memset (&temp, 0, sizeof (temp));
 
     value_copy = strdup (value);
     if (value_copy == NULL)
@@ -420,12 +420,11 @@ static void submit_chain (iptc_handle_t *handle, ip_chain_t *chain)
 
 static int iptables_read (void)
 {
-    int i;
     int num_failures = 0;
     ip_chain_t *chain;
 
     /* Init the iptc handle structure and query the correct table */
-    for (i = 0; i < chain_num; i++)
+    for (int i = 0; i < chain_num; i++)
     {
         chain = chain_list[i];
 
@@ -489,9 +488,7 @@ static int iptables_read (void)
 
 static int iptables_shutdown (void)
 {
-    int i;
-
-    for (i = 0; i < chain_num; i++)
+    for (int i = 0; i < chain_num; i++)
     {
         if ((chain_list[i] != NULL) && (chain_list[i]->rule_type == RTYPE_COMMENT))
             sfree (chain_list[i]->rule.comment);
