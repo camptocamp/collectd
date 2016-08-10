@@ -2495,6 +2495,7 @@ fi
   * #836 file descriptor count
   * #1867 Making /proc and /sys path configurable
   * #1700 tail plugin latency
+  * #1530 checking capabilities
 
 * Tue Jul 26 2016 Ruben Kerkhof <ruben@rubenkerkhof.com> - 5.5.2-1
 - New upstream version
