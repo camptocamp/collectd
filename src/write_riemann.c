@@ -31,7 +31,6 @@
 #include "collectd.h"
 
 #include "common.h"
-#include "configfile.h"
 #include "plugin.h"
 #include "utils_cache.h"
 #include "utils_complain.h"
@@ -101,6 +100,7 @@ static int wrr_connect(struct riemann_host *host) /* {{{ */
                node, port);
     return -1;
   }
+#if RCC_VERSION_NUMBER >= 0x010800
   if (host->timeout.tv_sec != 0) {
     if (riemann_client_set_timeout(host->client, &host->timeout) != 0) {
       riemann_client_free(host->client);
@@ -111,6 +111,7 @@ static int wrr_connect(struct riemann_host *host) /* {{{ */
       return -1;
     }
   }
+#endif
 
   set_sock_opts(riemann_client_get_fd(host->client));
 
@@ -612,7 +613,6 @@ static int wrr_config_node(oconfig_item_t *ci) /* {{{ */
   int i;
   oconfig_item_t *child;
   char callback_name[DATA_MAX_NAME_LEN];
-  user_data_t ud;
 
   if ((host = calloc(1, sizeof(*host))) == NULL) {
     ERROR("write_riemann plugin: calloc failed.");
@@ -681,9 +681,13 @@ static int wrr_config_node(oconfig_item_t *ci) /* {{{ */
       if (status != 0)
         break;
     } else if (strcasecmp("Timeout", child->key) == 0) {
+#if RCC_VERSION_NUMBER >= 0x010800
       status = cf_util_get_int(child, (int *)&host->timeout.tv_sec);
       if (status != 0)
         break;
+#else
+      WARNING("write_riemann plugin: The Timeout option is not supported. Please upgrade the Riemann client to at least 1.8.0.");
+#endif
     } else if (strcasecmp("Port", child->key) == 0) {
       host->port = cf_util_get_port_number(child);
       if (host->port == -1) {
@@ -790,8 +794,11 @@ static int wrr_config_node(oconfig_item_t *ci) /* {{{ */
 
   ssnprintf(callback_name, sizeof(callback_name), "write_riemann/%s",
             host->name);
-  ud.data = host;
-  ud.free_func = wrr_free;
+
+  user_data_t ud = {
+    .data = host,
+    .free_func = wrr_free
+  };
 
   pthread_mutex_lock(&host->lock);
 

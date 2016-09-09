@@ -28,7 +28,6 @@
 
 #include "common.h"
 #include "plugin.h"
-#include "configfile.h"
 
 #include "utils_dns.h"
 #include <poll.h>
@@ -357,7 +356,7 @@ static int dns_init (void)
 		if (getuid () == 0)
 			WARNING ("dns plugin: Running collectd as root, but the CAP_NET_RAW "
 					"capability is missing. The plugin's read function will probably "
-					"fail. Is your init system dropping capabilities ?");
+					"fail. Is your init system dropping capabilities?");
 		else
 			WARNING ("dns plugin: collectd doesn't have the CAP_NET_RAW capability. "
 					"If you don't want to run collectd as root, try running \"setcap "

@@ -1119,6 +1119,13 @@ When set to B<true>, the battery plugin will report three values: B<charged>
 and "remaining capacity") and B<degraded> (difference between "design capacity"
 and "last full capacity").
 
+=item B<QueryStateFS> B<false>|B<true>
+
+When set to B<true>, the battery plugin will only read statistics
+related to battery performance as exposed by StateFS at
+/run/state. StateFS is used in Mer-based Sailfish OS, for
+example.
+
 =back
 
 =head2 Plugin C<bind>
@@ -1458,6 +1465,11 @@ are set to B<true>. In this case, by default, metrics will be reported as
 Jiffies. By setting this option to B<true>, you can request percentage values
 in the un-aggregated (per-CPU, per-state) mode as well.
 
+=item B<ReportNumCpu> B<false>|B<true>
+
+When set to B<true>, reports the number of available CPUs.
+Defaults to B<false>.
+
 =back
 
 =head2 Plugin C<cpufreq>
@@ -1780,6 +1792,11 @@ values for all map keys or array indices will be collectd.
 The following options are valid within B<URL> blocks:
 
 =over 4
+
+=item B<Host> I<Name>
+
+Use I<Name> as the host name when submitting values. Defaults to the global
+host name setting.
 
 =item B<Instance> I<Instance>
 
@@ -2734,6 +2751,33 @@ The B<gRPC> homepage can be found at L<https://grpc.io/>.
 
 =over 4
 
+=item B<Server> I<Host> I<Port>
+
+The B<Server> statement sets the address of a server to which to send metrics
+via the C<DispatchValues> function.
+
+The argument I<Host> may be a hostname, an IPv4 address, or an IPv6 address.
+
+Optionally, B<Server> may be specified as a configuration block which supports
+the following options:
+
+=over 4
+
+=item B<EnableSSL> B<false>|B<true>
+
+Whether to require SSL for outgoing connections. Default: false.
+
+=item B<SSLCACertificateFile> I<Filename>
+
+=item B<SSLCertificateFile> I<Filename>
+
+=item B<SSLCertificateKeyFile> I<Filename>
+
+Filenames specifying SSL certificate and key material to be used with SSL
+connections.
+
+=back
+
 =item B<Listen> I<Host> I<Port>
 
 The B<Listen> statement sets the network address to bind to. When multiple
@@ -2751,21 +2795,16 @@ supports the following options:
 
 Whether to enable SSL for incoming connections. Default: false.
 
-=item B<SSLRootCerts> I<Filename>
+=item B<SSLCACertificateFile> I<Filename>
 
-=item B<SSLServerKey> I<Filename>
+=item B<SSLCertificateFile> I<Filename>
 
-=item B<SSLServerCert> I<Filename>
+=item B<SSLCertificateKeyFile> I<Filename>
 
 Filenames specifying SSL certificate and key material to be used with SSL
 connections.
 
 =back
-
-=item B<WorkerThreads> I<Num>
-
-Number of threads to start for handling incoming connections. The default
-value is B<5>.
 
 =back
 
@@ -2789,6 +2828,32 @@ Hostname to connect to. Defaults to B<127.0.0.1>.
 =item B<Port> I<Port>
 
 TCP-Port to connect to. Defaults to B<7634>.
+
+=back
+
+=head2 Plugin C<hugepages>
+
+To collect B<hugepages> information, collectd reads directories
+"/sys/devices/system/node/*/hugepages" and
+"/sys/kernel/mm/hugepages".
+Reading of these directories can be disabled by the following
+options (default is enabled).
+
+=over 4
+
+=item B<ReportPerNodeHP> I<true>|I<false>
+
+If enabled, information will be collected from the hugepage
+counters in "/sys/devices/system/node/*/hugepages".
+This is used to check the per-node hugepage statistics on
+a NUMA system.
+
+=item B<ReportRootHP> I<true>|I<false>
+
+If enabled, information will be collected from the hugepage
+counters in "/sys/kernel/mm/hugepages".
+This can be used on both NUMA and non-NUMA systems to check
+the overall hugepage statistics.
 
 =back
 
@@ -3093,6 +3158,12 @@ used (just like other plugins) and the I<plugin instance> will be empty.
 Defaults to false.
 
 =back
+
+=head2 Plugin C<lua>
+
+This plugin embeds a Lua interpreter into collectd and provides an interface
+to collectd's plugin system. See L<collectd-lua(5)> for its documentation.
+
 
 =head2 Plugin C<mbmon>
 
@@ -9444,7 +9515,7 @@ Available options:
 
 =item B<TypeInstance> I<String>
 
-=item B<MetaDataSet> I<String> I<String>
+=item B<MetaData> I<String> I<String>
 
 Set the appropriate field to the given string. The strings for plugin instance
 and type instance may be empty, the strings for host and plugin may not be

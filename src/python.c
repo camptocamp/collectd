@@ -197,7 +197,7 @@ static char reg_flush_doc[] = "register_flush(callback[, data][, name]) -> ident
 		"The callback function will be called with two or three parameters:\n"
 		"timeout: Indicates that only data older than 'timeout' seconds is to\n"
 		"    be flushed.\n"
-		"id: Specifies which values are to be flushed.\n"
+		"id: Specifies which values are to be flushed. Might be None.\n"
 		"data: The optional data parameter passed to the register function.\n"
 		"    If the parameter was omitted it will be omitted here, too.";
 
@@ -236,12 +236,23 @@ static cpy_callback_t *cpy_config_callbacks;
 static cpy_callback_t *cpy_init_callbacks;
 static cpy_callback_t *cpy_shutdown_callbacks;
 
+/* Make sure to hold the GIL while modifying these. */
+static int cpy_shutdown_triggered = 0;
+static int cpy_num_callbacks = 0;
+
 static void cpy_destroy_user_data(void *data) {
 	cpy_callback_t *c = data;
 	free(c->name);
+	CPY_LOCK_THREADS
 	Py_DECREF(c->callback);
 	Py_XDECREF(c->data);
 	free(c);
+	--cpy_num_callbacks;
+	if (!cpy_num_callbacks && cpy_shutdown_triggered) {
+		Py_Finalize();
+		return;
+	}
+	CPY_RELEASE_THREADS
 }
 
 /* You must hold the GIL to call this function!
@@ -389,12 +400,11 @@ static int cpy_write_callback(const data_set_t *ds, const value_list_t *value_li
 		}
 		dict = PyDict_New();  /* New reference. */
 		if (value_list->meta) {
-			int num;
 			char **table;
 			meta_data_t *meta = value_list->meta;
 
-			num = meta_data_toc(meta, &table);
-			for (size_t i = 0; i < num; ++i) {
+			int num = meta_data_toc(meta, &table);
+			for (int i = 0; i < num; ++i) {
 				int type;
 				char *string;
 				int64_t si;
@@ -519,7 +529,12 @@ static void cpy_flush_callback(int timeout, const char *id, user_data_t *data) {
 	PyObject *ret, *text;
 
 	CPY_LOCK_THREADS
-	text = cpy_string_to_unicode_or_bytes(id);
+	if (id) {
+		text = cpy_string_to_unicode_or_bytes(id);
+	} else {
+		text = Py_None;
+		Py_INCREF(text);
+	}
 	if (c->data == NULL)
 		ret = PyObject_CallFunction(c->callback, "iN", timeout, text); /* New reference. */
 	else
@@ -559,6 +574,7 @@ static PyObject *cpy_register_generic(cpy_callback_t **list_head, PyObject *args
 	c->callback = callback;
 	c->data = data;
 	c->next = *list_head;
+	++cpy_num_callbacks;
 	*list_head = c;
 	Py_XDECREF(mod);
 	PyMem_Free(name);
@@ -624,7 +640,6 @@ static PyObject *cpy_register_generic_userdata(void *reg, void *handler, PyObjec
 	char buf[512];
 	reg_function_t *register_function = (reg_function_t *) reg;
 	cpy_callback_t *c = NULL;
-	user_data_t user_data = { 0 };
 	char *name = NULL;
 	PyObject *callback = NULL, *data = NULL;
 	static char *kwlist[] = {"callback", "data", "name", NULL};
@@ -650,17 +665,19 @@ static PyObject *cpy_register_generic_userdata(void *reg, void *handler, PyObjec
 	c->data = data;
 	c->next = NULL;
 
-	user_data.free_func = cpy_destroy_user_data;
-	user_data.data = c;
+	user_data_t user_data = {
+		.data = c,
+		.free_func = cpy_destroy_user_data
+	};
 
 	register_function(buf, handler, &user_data);
+	++cpy_num_callbacks;
 	return cpy_string_to_unicode_or_bytes(buf);
 }
 
 static PyObject *cpy_register_read(PyObject *self, PyObject *args, PyObject *kwds) {
 	char buf[512];
 	cpy_callback_t *c = NULL;
-	user_data_t user_data = { 0 };
 	double interval = 0;
 	char *name = NULL;
 	PyObject *callback = NULL, *data = NULL;
@@ -687,11 +704,14 @@ static PyObject *cpy_register_read(PyObject *self, PyObject *args, PyObject *kwd
 	c->data = data;
 	c->next = NULL;
 
-	user_data.free_func = cpy_destroy_user_data;
-	user_data.data = c;
+	user_data_t user_data = {
+		.data = c,
+		.free_func = cpy_destroy_user_data
+	};
 
 	plugin_register_complex_read(/* group = */ "python", buf,
 			cpy_read_callback, DOUBLE_TO_CDTIME_T (interval), &user_data);
+	++cpy_num_callbacks;
 	return cpy_string_to_unicode_or_bytes(buf);
 }
 
@@ -797,14 +817,23 @@ static PyObject *cpy_unregister_generic(cpy_callback_t **list_head, PyObject *ar
 		PyErr_Format(PyExc_RuntimeError, "Unable to unregister %s callback '%s'.", desc, name);
 		return NULL;
 	}
-	/* Yes, this is actually save. To call this function the caller has to
-	 * hold the GIL. Well, save as long as there is only one GIL anyway ... */
+	/* Yes, this is actually safe. To call this function the caller has to
+	 * hold the GIL. Well, safe as long as there is only one GIL anyway ... */
 	if (prev == NULL)
 		*list_head = tmp->next;
 	else
 		prev->next = tmp->next;
 	cpy_destroy_user_data(tmp);
 	Py_RETURN_NONE;
+}
+
+static void cpy_unregister_list(cpy_callback_t **list_head) {
+	cpy_callback_t *cur, *next;
+	for (cur = *list_head; cur; cur = next) {
+		next = cur->next;
+		cpy_destroy_user_data(cur);
+	}
+	*list_head = NULL;
 }
 
 typedef int cpy_unregister_function_t(const char *name);
@@ -896,9 +925,17 @@ static PyMethodDef cpy_methods[] = {
 static int cpy_shutdown(void) {
 	PyObject *ret;
 
-	/* This can happen if the module was loaded but not configured. */
-	if (state != NULL)
-		PyEval_RestoreThread(state);
+	if (!state) {
+		printf("================================================================\n");
+		printf("collectd shutdown while running an interactive session. This will\n");
+		printf("probably leave your terminal in a mess.\n");
+		printf("Run the command \"reset\" to get it back into a usable state.\n");
+		printf("You can press Ctrl+D in the interactive session to\n");
+		printf("close collectd and avoid this problem in the future.\n");
+		printf("================================================================\n");
+	}
+
+	CPY_LOCK_THREADS
 
 	for (cpy_callback_t *c = cpy_shutdown_callbacks; c; c = c->next) {
 		ret = PyObject_CallFunctionObjArgs(c->callback, c->data, (void *) 0); /* New reference. */
@@ -908,11 +945,24 @@ static int cpy_shutdown(void) {
 			Py_DECREF(ret);
 	}
 	PyErr_Print();
-	Py_Finalize();
+
+	Py_BEGIN_ALLOW_THREADS
+	cpy_unregister_list(&cpy_config_callbacks);
+	cpy_unregister_list(&cpy_init_callbacks);
+	cpy_unregister_list(&cpy_shutdown_callbacks);
+	cpy_shutdown_triggered = 1;
+	Py_END_ALLOW_THREADS
+
+	if (!cpy_num_callbacks) {
+		Py_Finalize();
+		return 0;
+	}
+
+	CPY_RELEASE_THREADS
 	return 0;
 }
 
-static void *cpy_interactive(void *data) {
+static void *cpy_interactive(void *pipefd) {
 	PyOS_sighandler_t cur_sig;
 
 	/* Signal handler in a plugin? Bad stuff, but the best way to
@@ -937,18 +987,18 @@ static void *cpy_interactive(void *data) {
 	 * This will make sure that SIGINT won't kill collectd but
 	 * still interrupt syscalls like sleep and pause. */
 
-	PyEval_AcquireThread(state);
 	if (PyImport_ImportModule("readline") == NULL) {
 		/* This interactive session will suck. */
 		cpy_log_exception("interactive session init");
- 	}
+	}
 	cur_sig = PyOS_setsig(SIGINT, python_sigint_handler);
-	/* We totally forked just now. Everyone saw that, right? */
 	PyOS_AfterFork();
+	PyEval_InitThreads();
+	close(*(int *) pipefd);
 	PyRun_InteractiveLoop(stdin, "<stdin>");
 	PyOS_setsig(SIGINT, cur_sig);
 	PyErr_Print();
-	PyEval_ReleaseThread(state);
+	state = PyEval_SaveThread();
 	NOTICE("python: Interactive interpreter exited, stopping collectd ...");
 	pthread_kill(main_thread, SIGINT);
 	return NULL;
@@ -956,15 +1006,33 @@ static void *cpy_interactive(void *data) {
 
 static int cpy_init(void) {
 	PyObject *ret;
+	int pipefd[2];
+	char buf;
 	static pthread_t thread;
 
 	if (!Py_IsInitialized()) {
 		WARNING("python: Plugin loaded but not configured.");
 		plugin_unregister_shutdown("python");
+		Py_Finalize();
 		return 0;
 	}
-	PyEval_InitThreads();
-	/* Now it's finally OK to use python threads. */
+	main_thread = pthread_self();
+	if (do_interactive) {
+		if (pipe(pipefd)) {
+			ERROR("python: Unable to create pipe.");
+			return 1;
+		}
+		if (plugin_thread_create(&thread, NULL, cpy_interactive, pipefd + 1)) {
+			ERROR("python: Error creating thread for interactive interpreter.");
+		}
+		if(read(pipefd[0], &buf, 1))
+			;
+		(void)close(pipefd[0]);
+	} else {
+		PyEval_InitThreads();
+		state = PyEval_SaveThread();
+	}
+	CPY_LOCK_THREADS
 	for (cpy_callback_t *c = cpy_init_callbacks; c; c = c->next) {
 		ret = PyObject_CallFunctionObjArgs(c->callback, c->data, (void *) 0); /* New reference. */
 		if (ret == NULL)
@@ -972,13 +1040,7 @@ static int cpy_init(void) {
 		else
 			Py_DECREF(ret);
 	}
-	state = PyEval_SaveThread();
-	main_thread = pthread_self();
-	if (do_interactive) {
-		if (plugin_thread_create(&thread, NULL, cpy_interactive, NULL, "python interpreter")) {
-			ERROR("python: Error creating thread for interactive interpreter.");
-		}
-	}
+	CPY_RELEASE_THREADS
 
 	return 0;
 }

@@ -25,7 +25,6 @@
 
 #include "common.h"
 #include "plugin.h"
-#include "configfile.h"
 #include "utils_mount.h"
 #include "utils_ignorelist.h"
 
@@ -230,7 +229,10 @@ static int df_read (void)
 			}
 
 			/* Duplicate found: leave non-NULL dup_ptr. */
-			if (by_device && (strcmp (mnt_ptr->spec_device, dup_ptr->spec_device) == 0))
+			if (by_device
+                            && (mnt_ptr->spec_device != NULL)
+                            && (dup_ptr->spec_device != NULL)
+                            && (strcmp (mnt_ptr->spec_device, dup_ptr->spec_device) == 0))
 				break;
 			else if (!by_device && (strcmp (mnt_ptr->dir, dup_ptr->dir) == 0))
 				break;

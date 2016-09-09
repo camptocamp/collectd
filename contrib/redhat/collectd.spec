@@ -73,6 +73,7 @@
 %define with_gmond 0%{!?_without_gmond:1}
 %define with_gps 0%{!?_without_gps:1}
 %define with_hddtemp 0%{!?_without_hddtemp:1}
+%define with_hugepages 0%{!?_without_hugepages:1}
 %define with_interface 0%{!?_without_interface:1}
 %define with_ipc 0%{!?_without_ipc:1}
 %define with_ipmi 0%{!?_without_ipmi:1}
@@ -83,6 +84,7 @@
 %define with_load 0%{!?_without_load:1}
 %define with_log_logstash 0%{!?_without_log_logstash:1}
 %define with_logfile 0%{!?_without_logfile:1}
+%define with_lua 0%{!?_without_lua:1}
 %define with_lvm 0%{!?_without_lvm:1}
 %define with_madwifi 0%{!?_without_madwifi:1}
 %define with_mbmon 0%{!?_without_mbmon:1}
@@ -225,8 +227,8 @@
 
 Summary:	Statistics collection and monitoring daemon
 Name:		collectd
-Version:	5.5.2
-Release:	1%{?dist}
+Version:	5.7.0
+Release:	2%{?dist}
 URL:		https://collectd.org
 Source:		https://collectd.org/files/%{name}-%{version}.tar.bz2
 License:	GPLv2
@@ -493,6 +495,17 @@ Requires:      %{name}%{?_isa} = %{version}-%{release}
 BuildRequires: yajl-devel
 %description log_logstash
 This plugin logs in logstash JSON format
+%endif
+
+%if %{with_lua}
+%package lua
+Summary:	Lua plugin for collectd
+Group:		System Environment/Daemons
+Requires:	%{name}%{?_isa} = %{version}-%{release}
+BuildRequires:	lua-devel
+%description lua
+The Lua plugin embeds a Lua interpreter into collectd and exposes the
+application programming interface (API) to Lua scripts.
 %endif
 
 %if %{with_lvm}
@@ -1122,6 +1135,12 @@ Collectd utilities
 %define _with_hddtemp --disable-hddtemp
 %endif
 
+%if %{with_hugepages}
+%define _with_hugepages --enable-hugepages
+%else
+%define _with_hugepages --disable-hugepages
+%endif
+
 %if %{with_interface}
 %define _with_interface --enable-interface
 %else
@@ -1192,6 +1211,12 @@ Collectd utilities
 %define _with_lpar --enable-lpar
 %else
 %define _with_lpar --disable-lpar
+%endif
+
+%if %{with_lua}
+%define _with_lua --enable-lua
+%else
+%define _with_lua --disable-lua
 %endif
 
 %if %{with_lvm}
@@ -1745,6 +1770,7 @@ Collectd utilities
 	%{?_with_gps} \
 	%{?_with_grpc} \
 	%{?_with_hddtemp} \
+	%{?_with_hugepages} \
 	%{?_with_interface} \
 	%{?_with_ipc} \
 	%{?_with_ipmi} \
@@ -1756,6 +1782,7 @@ Collectd utilities
 	%{?_with_log_logstash} \
 	%{?_with_logfile} \
 	%{?_with_lpar} \
+	%{?_with_lua} \
 	%{?_with_lvm} \
 	%{?_with_madwifi} \
 	%{?_with_mbmon} \
@@ -1880,6 +1907,10 @@ find %{buildroot} -type f -name perllocal.pod -delete
 rm -f %{buildroot}%{_datadir}/collectd/java/collectd-api.jar
 rm -f %{buildroot}%{_datadir}/collectd/java/generic-jmx.jar
 rm -f %{buildroot}%{_mandir}/man5/collectd-java.5*
+%endif
+
+%if ! %{with_lua}
+rm -f %{buildroot}%{_mandir}/man5/collectd-lua.5*
 %endif
 
 %if ! %{with_perl}
@@ -2022,6 +2053,9 @@ fi
 %endif
 %if %{with_fscache}
 %{_libdir}/%{name}/fscache.so
+%endif
+%if %{with_hugepages}
+%{_libdir}/%{name}/hugepages.so
 %endif
 %if %{with_interface}
 %{_libdir}/%{name}/interface.so
@@ -2310,6 +2344,12 @@ fi
 %{_libdir}/%{name}/log_logstash.so
 %endif
 
+%if %{with_lua}
+%files lua
+%{_mandir}/man5/collectd-lua*
+%{_libdir}/%{name}/lua.so
+%endif
+
 %if %{with_lvm}
 %files lvm
 %{_libdir}/%{name}/lvm.so
@@ -2484,7 +2524,7 @@ fi
 %doc contrib/
 
 %changelog
-* Wed Aug 10 2016 Marc Fournier <marc.fournier@camptocamp.com> 5.5.2-2
+* Wed Sep 09 2016 Marc Fournier <marc.fournier@camptocamp.com> 5.6.0-2
 - Custom build from current master
 - Bump DATA_MAX_NAME_LEN to 512
 - Added custom patches:
@@ -2495,7 +2535,15 @@ fi
   * #836 file descriptor count
   * #1867 Making /proc and /sys path configurable
   * #1700 tail plugin latency
-  * #1530 checking capabilities
+
+* Tue Aug 23 2016 Marc Fournier <marc.fournier@camptocamp.com> - 5.7.0-1
+- New PRE-RELEASE version
+- New plugins enabled by default: hugepages
+
+* Sun Aug 14 2016 Ruben Kerkhof <ruben@rubenkerkhof.com> - 5.6.0-1
+- New PRE-RELEASE version
+- New plugins enabled by default: chrony, cpusleep, gps, lua, mqtt, notify_nagios
+- New plugins disabled by default: grpc, xencpu, zone
 
 * Tue Jul 26 2016 Ruben Kerkhof <ruben@rubenkerkhof.com> - 5.5.2-1
 - New upstream version
@@ -2504,8 +2552,6 @@ fi
 
 * Sat Jun 04 2016 Ruben Kerkhof <ruben@rubenkerkhof.com> 5.5.1-1
 - New upstream version
-- New plugins enabled by default: chrony, mqtt, notify_nagios
-- New plugins disabled by default: grpc, zone, xencpu
 
 * Wed May 27 2015 Marc Fournier <marc.fournier@camptocamp.com> 5.5.0-1
 - New upstream version

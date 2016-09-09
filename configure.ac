@@ -486,6 +486,7 @@ then
 #include <linux/major.h>
 #include <linux/types.h>
 ])
+	AC_CHECK_HEADERS([sys/sysmacros.h])
 else
 	have_linux_raid_md_u_h="no"
 fi
@@ -682,10 +683,26 @@ AC_CHECK_HEADERS([ \
   wordexp.h \
 ])
 
-AC_CHECK_HEADERS([xfs/xqm.h], [], [],
-[
-#define _GNU_SOURCE
-])
+# --enable-xfs {{{
+AC_ARG_ENABLE([xfs],
+  [AS_HELP_STRING([--enable-xfs], [xfs support in df plugin @<:@default=yes@:>@])],
+  [],
+  [enable_xfs="auto"]
+)
+
+if test "x$enable_xfs" != "xno"; then
+  AC_CHECK_HEADERS([xfs/xqm.h],
+    [],
+    [
+      if test "x$enable_xfs" = "xyes"; then
+        AC_MSG_ERROR([xfs/xqm.h not found])
+      fi
+    ],
+    [[#define _GNU_SOURCE]]
+  )
+fi
+
+# }}}
 
 # For the dns plugin
 AC_CHECK_HEADERS(arpa/nameser.h)
@@ -2418,7 +2435,7 @@ if test "x$with_libgrpcpp" = "xyes"
 then
   AC_LANG_PUSH(C++)
   SAVE_CPPFLAGS="$CPPFLAGS"
-  CPPFLAGS="$with_libgrpcpp_cppflags $GRPCPP_CFLAGS $CPPFLAGS -std=c++11"
+  CPPFLAGS="-std=c++11 $with_libgrpcpp_cppflags $GRPCPP_CFLAGS $CPPFLAGS"
   AC_CHECK_HEADERS([grpc++/grpc++.h], [],
     [with_libgrpcpp="no (<grpc++/grpc++.h> not found)"]
   )
@@ -2428,8 +2445,10 @@ fi
 if test "x$with_libgrpcpp" = "xyes"
 then
   AC_LANG_PUSH(C++)
+  SAVE_CPPFLAGS="$CPPFLAGS"
   SAVE_LDFLAGS="$LDFLAGS"
   SAVE_LIBS="$LIBS"
+  CPPFLAGS="-std=c++11 $with_libgrpcpp_cppflags $GRPCPP_CFLAGS $CPPFLAGS"
   LDFLAGS="$with_libgrpcpp_ldflags"
   if test "x$GRPCPP_LIBS" = "x"
   then
@@ -2451,6 +2470,7 @@ then
     ],
     [with_libgrpcpp="no (libgrpc++ not found)"]
   )
+  CPPFLAGS="$SAVE_CPPFLAGS"
   LDFLAGS="$SAVE_LDFLAGS"
   LIBS="$SAVE_LIBS"
   AC_LANG_POP(C++)
@@ -2786,6 +2806,86 @@ then
 	AC_SUBST(BUILD_WITH_LIBLDAP_LDFLAGS)
 fi
 AM_CONDITIONAL(BUILD_WITH_LIBLDAP, test "x$with_libldap" = "xyes")
+# }}}
+
+# --with-liblua {{{
+AC_ARG_VAR([LIBLUA_PKG_CONFIG_NAME], [Name of liblua used by pkg-config])
+if test "x$LIBLUA_PKG_CONFIG_NAME" != "x"
+then
+  PKG_CHECK_MODULES([LUA], [$LIBLUA_PKG_CONFIG_NAME],
+    [with_liblua="yes"],
+    [with_liblua="no"]
+  )
+else
+  PKG_CHECK_MODULES([LUA], [lua],
+    [with_liblua="yes"],
+    [
+      PKG_CHECK_MODULES([LUA], [lua-5.3],
+        [with_liblua="yes"],
+        [
+	  PKG_CHECK_MODULES([LUA], [lua5.3],
+            [with_liblua="yes"],
+            [
+              PKG_CHECK_MODULES([LUA], [lua-5.2],
+                [with_liblua="yes"],
+                [
+                  PKG_CHECK_MODULES([LUA], [lua5.2],
+                    [with_liblua="yes"],
+                    [
+                      PKG_CHECK_MODULES([LUA], [lua-5.1],
+                        [with_liblua="yes"],
+                        [
+                          PKG_CHECK_MODULES([LUA], [lua5.1],
+                            [with_liblua="yes"],
+                            [with_liblua="no (pkg-config cannot find liblua)"]
+                          )
+                        ]
+                      )
+                    ]
+                  )
+                ]
+              )
+            ]
+          )
+        ]
+      )
+    ]
+  )
+fi
+
+if test "x$with_liblua" = "xyes"
+then
+  SAVE_CFLAGS="$CFLAGS"
+  CFLAGS="$CFLAGS $LUA_CFLAGS"
+
+  AC_CHECK_HEADERS([lua.h lauxlib.h lualib.h],
+    [with_liblua="yes"],
+    [with_liblua="no (header not found)"]
+  )
+
+  CFLAGS="$SAVE_CFLAGS"
+fi
+
+if test "x$with_liblua" = "xyes"
+then
+  SAVE_LIBS="$LIBS"
+  LIBS="$LIBS $LUA_LIBS"
+
+  AC_CHECK_FUNC([lua_settop],
+    [with_liblua="yes"],
+    [with_liblua="no (symbol 'lua_settop' not found)"]
+  )
+
+  LIBS="$SAVE_LIBS"
+fi
+
+if test "x$with_liblua" = "xyes"
+then
+    BUILD_WITH_LIBLUA_CFLAGS="$LUA_CFLAGS"
+    BUILD_WITH_LIBLUA_LIBS="$LUA_LIBS"
+fi
+AC_SUBST(BUILD_WITH_LIBLUA_CFLAGS)
+AC_SUBST(BUILD_WITH_LIBLUA_LIBS)
 # }}}
 
 # --with-liblvm2app {{{
@@ -3370,9 +3470,6 @@ AM_CONDITIONAL(BUILD_WITH_LIBNETAPP, test "x$with_libnetapp" = "xyes")
 # }}}
 
 # --with-libnetsnmp {{{
-with_snmp_config="net-snmp-config"
-with_snmp_cflags=""
-with_snmp_libs=""
 AC_ARG_WITH(libnetsnmp, [AS_HELP_STRING([--with-libnetsnmp@<:@=PREFIX@:>@], [Path to the Net-SNMPD library.])],
 [
 	if test "x$withval" = "xno"
@@ -3382,57 +3479,42 @@ AC_ARG_WITH(libnetsnmp, [AS_HELP_STRING([--with-libnetsnmp@<:@=PREFIX@:>@], [Pat
 	then
 		with_libnetsnmp="yes"
 	else
-		if test -x "$withval"
-		then
-			with_snmp_config="$withval"
-			with_libnetsnmp="yes"
-		else
-			with_snmp_config="$withval/bin/net-snmp-config"
-			with_libnetsnmp="yes"
-		fi
+		with_libnetsnmp_cppflags="-I$withval/include"
+		with_libnetsnmp_ldflags="-I$withval/lib"
+		with_libnetsnmp="yes"
 	fi; fi
 ],
 [with_libnetsnmp="yes"])
 if test "x$with_libnetsnmp" = "xyes"
 then
-	with_snmp_cflags=`$with_snmp_config --cflags 2>/dev/null`
-	snmp_config_status=$?
+	SAVE_CPPFLAGS="$CPPFLAGS"
+	CPPFLAGS="$CPPFLAGS $with_libnetsnmp_cppflags"
 
-	if test $snmp_config_status -ne 0
-	then
-		with_libnetsnmp="no ($with_snmp_config failed)"
-	else
-		SAVE_CPPFLAGS="$CPPFLAGS"
-		CPPFLAGS="$CPPFLAGS $with_snmp_cflags"
+	AC_CHECK_HEADERS(net-snmp/net-snmp-config.h, [], [with_libnetsnmp="no (net-snmp/net-snmp-config.h not found)"])
 
-		AC_CHECK_HEADERS(net-snmp/net-snmp-config.h, [], [with_libnetsnmp="no (net-snmp/net-snmp-config.h not found)"])
-
-		CPPFLAGS="$SAVE_CPPFLAGS"
-	fi
+	CPPFLAGS="$SAVE_CPPFLAGS"
 fi
 if test "x$with_libnetsnmp" = "xyes"
 then
-	with_snmp_libs=`$with_snmp_config --libs 2>/dev/null`
-	snmp_config_status=$?
+	SAVE_LDFLAGS="$LDFLAGS"
+	LDFLAGS="$LDFLAGS $with_libnetsnmp_ldflags"
 
-	if test $snmp_config_status -ne 0
-	then
-		with_libnetsnmp="no ($with_snmp_config failed)"
-	else
-		AC_CHECK_LIB(netsnmp, init_snmp,
+	AC_CHECK_LIB(netsnmp, init_snmp,
 		[with_libnetsnmp="yes"],
 		[with_libnetsnmp="no (libnetsnmp not found)"],
 		[$with_snmp_libs])
-	fi
+
+	LDFLAGS="$SAVE_LDFLAGS"
 fi
 if test "x$with_libnetsnmp" = "xyes"
 then
-	BUILD_WITH_LIBSNMP_CFLAGS="$with_snmp_cflags"
-	BUILD_WITH_LIBSNMP_LIBS="$with_snmp_libs"
-	AC_SUBST(BUILD_WITH_LIBSNMP_CFLAGS)
-	AC_SUBST(BUILD_WITH_LIBSNMP_LIBS)
+	BUILD_WITH_LIBNETSNMP_CPPFLAGS="$with_libnetsnmp_cppflags"
+	BUILD_WITH_LIBNETSNMP_LDFLAGS="$with_libnetsnmp_ldflags"
+	BUILD_WITH_LIBNETSNMP_LIBS="-lnetsnmp"
 fi
-AM_CONDITIONAL(BUILD_WITH_LIBNETSNMP, test "x$with_libnetsnmp" = "xyes")
+AC_SUBST(BUILD_WITH_LIBNETSNMP_CPPFLAGS)
+AC_SUBST(BUILD_WITH_LIBNETSNMP_LDFLAGS)
+AC_SUBST(BUILD_WITH_LIBNETSNMP_LIBS)
 # }}}
 
 # --with-liboconfig {{{
@@ -3465,7 +3547,7 @@ save_LDFLAGS="$LDFLAGS"
 save_CPPFLAGS="$CPPFLAGS"
 LDFLAGS="$liboconfig_LDFLAGS"
 CPPFLAGS="$liboconfig_CPPFLAGS"
-AC_CHECK_LIB(oconfig, oconfig_parse_fh,
+AC_CHECK_LIB(oconfig, oconfig_parse_file,
 [
 	with_liboconfig="yes"
 	with_own_liboconfig="no"
@@ -5516,7 +5598,7 @@ PKG_CHECK_MODULES([LIBNOTIFY], [libnotify],
 		[with_libnotify="no (pkg-config doesn't know libnotify)"]
 )
 
-PKG_CHECK_MODULES([LIBRIEMANN_CLIENT], [riemann-client >= 1.8.0],
+PKG_CHECK_MODULES([LIBRIEMANN_CLIENT], [riemann-client >= 1.6.0],
  [with_libriemann_client="yes"],
  [with_libriemann_client="no (pkg-config doesn't know libriemann-client)"])
 
@@ -5669,6 +5751,7 @@ plugin_fhcount="no"
 plugin_fscache="no"
 plugin_gps="no"
 plugin_grpc="no"
+plugin_hugepages="no"
 plugin_interface="no"
 plugin_ipmi="no"
 plugin_ipvs="no"
@@ -5717,6 +5800,7 @@ then
 	plugin_entropy="yes"
 	plugin_fhcount="yes"
 	plugin_fscache="yes"
+	plugin_hugepages="yes"
 	plugin_interface="yes"
 	plugin_ipc="yes"
 	plugin_irq="yes"
@@ -6123,6 +6207,7 @@ AC_PLUGIN([gmond],               [$with_libganglia],        [Ganglia plugin])
 AC_PLUGIN([gps],                 [$plugin_gps],             [GPS plugin])
 AC_PLUGIN([grpc],                [$plugin_grpc],            [gRPC plugin])
 AC_PLUGIN([hddtemp],             [yes],                     [Query hddtempd])
+AC_PLUGIN([hugepages],           [$plugin_hugepages],       [Hugepages statistics])
 AC_PLUGIN([interface],           [$plugin_interface],       [Interface traffic statistics])
 AC_PLUGIN([ipc],                 [$plugin_ipc],             [IPC statistics])
 AC_PLUGIN([ipmi],                [$plugin_ipmi],            [IPMI sensor statistics])
@@ -6134,6 +6219,7 @@ AC_PLUGIN([load],                [$plugin_load],            [System load])
 AC_PLUGIN([log_logstash],        [$plugin_log_logstash],    [Logstash json_event compatible logging])
 AC_PLUGIN([logfile],             [yes],                     [File logging plugin])
 AC_PLUGIN([lpar],                [$with_perfstat],          [AIX logical partitions statistics])
+AC_PLUGIN([lua],                 [$with_liblua],            [Lua plugin])
 AC_PLUGIN([lvm],                 [$with_liblvm2app],        [LVM statistics])
 AC_PLUGIN([madwifi],             [$have_linux_wireless_h],  [Madwifi wireless statistics])
 AC_PLUGIN([match_empty_counter], [yes],                     [The empty counter match])
@@ -6352,6 +6438,18 @@ AC_ARG_WITH(perl-bindings, [AS_HELP_STRING([--with-perl-bindings@<:@=OPTIONS@:>@
 		with_perl_bindings="no (no perl interpreter found)"
 	fi
 ])
+
+if test "x$with_perl_bindings" = "xyes"
+then
+	AC_MSG_CHECKING([for the ExtUtils::MakeMaker module])
+	if $PERL -MExtUtils::MakeMaker -e '' 2>/dev/null; then
+		AC_MSG_RESULT([yes])
+	else
+		AC_MSG_RESULT([no])
+		with_perl_bindings="no (ExtUtils::MakeMaker not found)"
+	fi
+fi
+
 if test "x$with_perl_bindings" = "xyes"
 then
 	PERL_BINDINGS="perl"
@@ -6451,6 +6549,7 @@ AC_MSG_RESULT([    libjvm  . . . . . . . $with_java])
 AC_MSG_RESULT([    libkstat  . . . . . . $with_kstat])
 AC_MSG_RESULT([    libkvm  . . . . . . . $with_libkvm])
 AC_MSG_RESULT([    libldap . . . . . . . $with_libldap])
+AC_MSG_RESULT([    liblua  . . . . . . . $with_liblua])
 AC_MSG_RESULT([    liblvm2app  . . . . . $with_liblvm2app])
 AC_MSG_RESULT([    libmemcached  . . . . $with_libmemcached])
 AC_MSG_RESULT([    libmnl  . . . . . . . $with_libmnl])
@@ -6539,6 +6638,7 @@ AC_MSG_RESULT([    gmond . . . . . . . . $enable_gmond])
 AC_MSG_RESULT([    gps . . . . . . . . . $enable_gps])
 AC_MSG_RESULT([    grpc  . . . . . . . . $enable_grpc])
 AC_MSG_RESULT([    hddtemp . . . . . . . $enable_hddtemp])
+AC_MSG_RESULT([    hugepages . . . . . . $enable_hugepages])
 AC_MSG_RESULT([    interface . . . . . . $enable_interface])
 AC_MSG_RESULT([    ipc . . . . . . . . . $enable_ipc])
 AC_MSG_RESULT([    ipmi  . . . . . . . . $enable_ipmi])
@@ -6550,6 +6650,7 @@ AC_MSG_RESULT([    load  . . . . . . . . $enable_load])
 AC_MSG_RESULT([    logfile . . . . . . . $enable_logfile])
 AC_MSG_RESULT([    log_logstash  . . . . $enable_log_logstash])
 AC_MSG_RESULT([    lpar  . . . . . . . . $enable_lpar])
+AC_MSG_RESULT([    lua . . . . . . . . . $enable_lua])
 AC_MSG_RESULT([    lvm . . . . . . . . . $enable_lvm])
 AC_MSG_RESULT([    madwifi . . . . . . . $enable_madwifi])
 AC_MSG_RESULT([    match_empty_counter . $enable_match_empty_counter])
