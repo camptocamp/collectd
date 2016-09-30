@@ -149,12 +149,19 @@ static void format_text(ProtobufCBuffer *buffer) {
 
       char labels[1024];
 
+      char timestamp_ms[24] = "";
+      if (m->has_timestamp_ms)
+        ssnprintf(timestamp_ms, sizeof(timestamp_ms), " %" PRIi64,
+                  m->timestamp_ms);
+
       if (fam->type == IO__PROMETHEUS__CLIENT__METRIC_TYPE__GAUGE)
-        ssnprintf(line, sizeof(line), "%s{%s} " GAUGE_FORMAT "\n", fam->name,
-                  format_labels(labels, sizeof(labels), m), m->gauge->value);
+        ssnprintf(line, sizeof(line), "%s{%s} " GAUGE_FORMAT "%s\n", fam->name,
+                  format_labels(labels, sizeof(labels), m), m->gauge->value,
+                  timestamp_ms);
       else /* if (fam->type == IO__PROMETHEUS__CLIENT__METRIC_TYPE__COUNTER) */
-        ssnprintf(line, sizeof(line), "%s{%s} %.0f\n", fam->name,
-                  format_labels(labels, sizeof(labels), m), m->counter->value);
+        ssnprintf(line, sizeof(line), "%s{%s} %.0f%s\n", fam->name,
+                  format_labels(labels, sizeof(labels), m), m->counter->value,
+                  timestamp_ms);
 
       buffer->append(buffer, strlen(line), (uint8_t *)line);
     }
