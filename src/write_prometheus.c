@@ -459,6 +459,11 @@ metric_family_delete_metric(Io__Prometheus__Client__MetricFamily *fam,
             ((fam->n_metric - 1) - i) * sizeof(fam->metric[i]));
   fam->n_metric--;
 
+  Io__Prometheus__Client__Metric **tmp =
+      realloc(fam->metric, fam->n_metric * sizeof(*fam->metric));
+  if ((tmp != NULL) || (fam->n_metric == 0))
+    fam->metric = tmp;
+
   return 0;
 }
 
@@ -516,6 +521,8 @@ static void metric_family_destroy(Io__Prometheus__Client__MetricFamily *msg) {
     metric_destroy(msg->metric[i]);
   }
   sfree(msg->metric);
+
+  sfree(msg);
 }
 
 /* metric_family_create allocates and initializes a new metric family. */
