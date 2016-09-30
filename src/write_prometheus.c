@@ -168,6 +168,11 @@ static void format_text(ProtobufCBuffer *buffer) {
   }
   c_avl_iterator_destroy(iter);
 
+  char server[1024];
+  ssnprintf(server, sizeof(server), "\n# collectd/write_prometheus %s at %s\n",
+            PACKAGE_VERSION, hostname_g);
+  buffer->append(buffer, strlen(server), (uint8_t *)server);
+
   pthread_mutex_unlock(&metrics_lock);
 }
 
