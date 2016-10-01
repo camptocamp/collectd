@@ -1461,7 +1461,7 @@ CLEANFILES += prometheus.pb-c.c prometheus.pb-c.h
 BUILT_SOURCES += prometheus.pb-c.c prometheus.pb-c.h
 
 prometheus.pb-c.c prometheus.pb-c.h: $(top_srcdir)/proto/prometheus.proto
-	$(AM_V_PROTOC_C)$(PROTOC_C) -I$(top_srcdir)/proto --c_out=$(builddir) $<
+	$(AM_V_PROTOC_C)$(PROTOC_C) -I$(top_srcdir)/proto --c_out=$(builddir) $(top_srcdir)/proto/prometheus.proto
 endif
 
 install-exec-hook:
