@@ -683,7 +683,7 @@ static int prom_init() {
 
   if (httpd == NULL) {
     unsigned int flags = MHD_USE_THREAD_PER_CONNECTION;
-#if MHD_VERSION >= 0x00090000
+#if MHD_VERSION >= 0x00093300
     flags |= MHD_USE_DUAL_STACK;
 #endif
 
