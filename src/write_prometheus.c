@@ -195,8 +195,8 @@ static int http_handler(void *cls, struct MHD_Connection *connection,
     return MHD_YES;
   }
 
-  char const *accept =
-      MHD_lookup_connection_value(connection, MHD_HEADER_KIND, "Accept");
+  char const *accept = MHD_lookup_connection_value(connection, MHD_HEADER_KIND,
+                                                   MHD_HTTP_HEADER_ACCEPT);
   _Bool want_proto =
       (accept != NULL) &&
       (strstr(accept, "application/vnd.google.protobuf") != NULL);
@@ -210,9 +210,9 @@ static int http_handler(void *cls, struct MHD_Connection *connection,
   else
     format_text(buffer);
 
-  struct MHD_Response *res = MHD_create_response_from_buffer(
-      simple.len, simple.data, MHD_RESPMEM_MUST_COPY);
-  MHD_add_response_header(res, "Content-Type",
+  struct MHD_Response *res = MHD_create_response_from_data(
+      simple.len, simple.data, /* must_free = */ 0, /* must_copy = */ 1);
+  MHD_add_response_header(res, MHD_HTTP_HEADER_CONTENT_TYPE,
                           want_proto ? CONTENT_TYPE_PROTO : CONTENT_TYPE_TEXT);
 
   int status = MHD_queue_response(connection, MHD_HTTP_OK, res);
@@ -682,8 +682,12 @@ static int prom_init() {
   }
 
   if (httpd == NULL) {
-    httpd = MHD_start_daemon(MHD_USE_THREAD_PER_CONNECTION | MHD_USE_DUAL_STACK,
-                             httpd_port,
+    unsigned int flags = MHD_USE_THREAD_PER_CONNECTION;
+#if MHD_VERSION >= 0x00090000
+    flags |= MHD_USE_DUAL_STACK;
+#endif
+
+    httpd = MHD_start_daemon(flags, httpd_port,
                              /* MHD_AcceptPolicyCallback = */ NULL,
                              /* MHD_AcceptPolicyCallback arg = */ NULL,
                              http_handler, NULL, MHD_OPTION_END);
