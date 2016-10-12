@@ -200,17 +200,11 @@ static int protocols_read (void)
   int status;
   int success = 0;
 
-  const char *prefix = global_option_get("PseudoFSPrefix");
-  char snmp_file[strlen(prefix) + strlen(SNMP_FILE) + 1];
-  char netstat_file[strlen(prefix) + strlen(SNMP_FILE) + 1];
-
-  ssnprintf(snmp_file, sizeof(snmp_file), "%s%s", prefix, SNMP_FILE);
-  status = read_file (snmp_file);
+  status = read_file (SNMP_FILE);
   if (status == 0)
     success++;
 
-  ssnprintf(netstat_file, sizeof(netstat_file), "%s%s", prefix, NETSTAT_FILE);
-  status = read_file (netstat_file);
+  status = read_file (NETSTAT_FILE);
   if (status == 0)
     success++;
 

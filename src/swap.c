@@ -243,17 +243,11 @@ static int swap_read_separate (void) /* {{{ */
 	FILE *fh;
 	char buffer[1024];
 
-	const char *prefix = global_option_get("PseudoFSPrefix");
-	const char *path   = "/proc/swaps";
-	char statfile[strlen(prefix) + strlen(path) + 1];
-
-	ssnprintf(statfile, sizeof(statfile), "%s%s", prefix, path);
-	fh = fopen (statfile, "r");
+	fh = fopen ("/proc/swaps", "r");
 	if (fh == NULL)
 	{
 		char errbuf[1024];
-		WARNING ("swap plugin: fopen (%s) failed: %s",
-				statfile,
+		WARNING ("swap plugin: fopen (/proc/swaps) failed: %s",
 				sstrerror (errno, errbuf, sizeof (errbuf)));
 		return (-1);
 	}
@@ -304,22 +298,16 @@ static int swap_read_combined (void) /* {{{ */
 	FILE *fh;
 	char buffer[1024];
 
-	const char *prefix = global_option_get("PseudoFSPrefix");
-	const char *path   = "/proc/meminfo";
-	char statfile[strlen(prefix) + strlen(path) + 1];
-
 	gauge_t swap_used   = NAN;
 	gauge_t swap_cached = NAN;
 	gauge_t swap_free   = NAN;
 	gauge_t swap_total  = NAN;
 
-	ssnprintf(statfile, sizeof(statfile), "%s%s", prefix, path);
-	fh = fopen (statfile, "r");
+	fh = fopen ("/proc/meminfo", "r");
 	if (fh == NULL)
 	{
 		char errbuf[1024];
-		WARNING ("swap plugin: fopen (%s) failed: %s",
-				statfile,
+		WARNING ("swap plugin: fopen (/proc/meminfo) failed: %s",
 				sstrerror (errno, errbuf, sizeof (errbuf)));
 		return (-1);
 	}
@@ -369,29 +357,19 @@ static int swap_read_io (void) /* {{{ */
 
 	_Bool old_kernel = 0;
 
-	const char *prefix      = global_option_get("PseudoFSPrefix");
-	const char *vmstat_path = "/proc/vmstat";
-	const char *stat_path   = "/proc/stat";
-	char proc_vmstat[strlen(prefix) + strlen(vmstat_path) + 1];
-	char proc_stat[strlen(prefix) + strlen(stat_path) + 1];
-
 	uint8_t have_data = 0;
 	derive_t swap_in  = 0;
 	derive_t swap_out = 0;
 
-	ssnprintf(proc_vmstat, sizeof(proc_vmstat), "%s%s", prefix, vmstat_path);
-	ssnprintf(proc_stat, sizeof(proc_stat), "%s%s", prefix, stat_path);
-
-	fh = fopen (proc_vmstat, "r");
+	fh = fopen ("/proc/vmstat", "r");
 	if (fh == NULL)
 	{
 		/* /proc/vmstat does not exist in kernels <2.6 */
-		fh = fopen (proc_stat, "r");
+		fh = fopen ("/proc/stat", "r");
 		if (fh == NULL)
 		{
 			char errbuf[1024];
-			WARNING ("swap: fopen (%s/proc/{vmstat,stat}): %s",
-					prefix,
+			WARNING ("swap: fopen: %s",
 					sstrerror (errno, errbuf, sizeof (errbuf)));
 			return (-1);
 		}

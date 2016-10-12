@@ -114,17 +114,11 @@ static int vmem_read (void)
   FILE *fh;
   char buffer[1024];
 
-  const char *prefix = global_option_get("PseudoFSPrefix");
-  const char *path   = "/proc/vmstat";
-  char statfile[strlen(prefix) + strlen(path) + 1];
-
-  ssnprintf(statfile, sizeof(statfile), "%s%s", prefix, path);
-  fh = fopen (statfile, "r");
+  fh = fopen ("/proc/vmstat", "r");
   if (fh == NULL)
   {
     char errbuf[1024];
-    ERROR ("vmem plugin: fopen (%s) failed: %s",
-        statfile,
+    ERROR ("vmem plugin: fopen (/proc/vmstat) failed: %s",
 	sstrerror (errno, errbuf, sizeof (errbuf)));
     return (-1);
   }

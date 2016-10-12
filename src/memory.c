@@ -296,16 +296,10 @@ static int memory_read_internal (value_list_t *vl)
 	gauge_t mem_slab_reclaimable = 0;
 	gauge_t mem_slab_unreclaimable = 0;
 
-	const char *prefix = global_option_get("PseudoFSPrefix");
-	const char *path   = "/proc/meminfo";
-	char statfile[strlen(prefix) + strlen(path) + 1];
-
-	ssnprintf(statfile, sizeof(statfile), "%s%s", prefix, path);
-	if ((fh = fopen (statfile, "r")) == NULL)
+	if ((fh = fopen ("/proc/meminfo", "r")) == NULL)
 	{
 		char errbuf[1024];
-		ERROR ("memory plugin: fopen (%s) failed: %s",
-				statfile,
+		WARNING ("memory: fopen: %s",
 				sstrerror (errno, errbuf, sizeof (errbuf)));
 		return (-1);
 	}
