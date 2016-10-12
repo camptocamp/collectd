@@ -2573,6 +2573,81 @@ then
 fi
 # }}}
 
+# --with-libdpdk {{{
+AC_ARG_WITH(libdpdk, [AS_HELP_STRING([--with-libdpdk@<:@=PREFIX@:>@], [Path to the DPDK build directory.])],
+[
+	if test "x$withval" != "xno" && test "x$withval" != "xyes"
+	then
+		RTE_BUILD="$withval"
+		with_libdpdk="yes"
+	else
+		RTE_BUILD="/usr"
+		with_libdpdk="$withval"
+	fi
+	DPDK_INCLUDE="$RTE_BUILD/include"
+	DPDK_LIB_DIR="$RTE_BUILD/lib"
+	FOUND_DPDK=yes
+], [with_libdpdk="no"])
+
+if test "x$with_libdpdk" = "xyes"
+then
+	LOCAL_DPDK_INSTALL="no"
+	AC_CHECK_HEADER([$DPDK_INCLUDE/rte_config.h], [LOCAL_DPDK_INSTALL=yes],
+		[AC_CHECK_HEADER([$DPDK_INCLUDE/dpdk/rte_config.h],
+		[],
+		[FOUND_DPDK=no], [])], [])
+
+	if test "x$LOCAL_DPDK_INSTALL" = "xno"
+	then
+		DPDK_INCLUDE=$DPDK_INCLUDE/dpdk
+	fi
+
+	if test "x$FOUND_DPDK" = "xno"
+	then
+		AC_MSG_ERROR([libdpdk error: rte_config.h not found])
+	fi
+fi
+
+if test "x$with_libdpdk" = "xyes"
+then
+	SAVE_LDFLAGS="$LDFLAGS"
+
+	if test "x$LOCAL_DPDK_INSTALL" != "xyes"
+	then
+		LDFLAGS="$LDFLAGS -L$DPDK_LIB_DIR"
+        fi
+
+	AC_CHECK_LIB(dpdk, rte_eal_init,
+                     [BUILD_WITH_DPDK_LIBS="-Wl,-ldpdk"],
+                     [FOUND_DPDK=no])
+
+	LDFLAGS="$SAVE_LDFLAGS"
+	if test "x$FOUND_DPDK" = "xno"
+	then
+		AC_MSG_ERROR([libdpdk error: cannot link with dpdk in $DPDK_LIB_DIR])
+	fi
+fi
+
+#
+# Note: An issue on Ubuntu 14.04 necessitates the use of -Wl,--no-as-needed:
+# If you try compile with the older linker, the dpdk symbols will be undefined.
+# This workaround should be removed when no longer necessary.
+#
+if test "x$with_libdpdk" = "xyes"
+then
+	BUILD_WITH_DPDK_CFLAGS+="-I$DPDK_INCLUDE"
+	if test "x$LOCAL_DPDK_INSTALL" != "xyes"
+	then
+		BUILD_WITH_DPDK_LDFLAGS="-Wl,--no-as-needed"
+	else
+		BUILD_WITH_DPDK_LDFLAGS="-L$DPDK_LIB_DIR -Wl,--no-as-needed"
+        fi
+	AC_SUBST(BUILD_WITH_DPDK_CFLAGS)
+	AC_SUBST(BUILD_WITH_DPDK_LDFLAGS)
+	AC_SUBST(BUILD_WITH_DPDK_LIBS)
+fi
+# }}}
+
 # --with-java {{{
 with_java_home="$JAVA_HOME"
 if test "x$with_java_home" = "x"
@@ -4063,6 +4138,55 @@ then
 	AC_SUBST(BUILD_WITH_LIBPQ_LDFLAGS)
 fi
 AM_CONDITIONAL(BUILD_WITH_LIBPQ, test "x$with_libpq" = "xyes")
+# }}}
+
+# --with-libpqos {{{
+with_libpqos_cppflags=""
+with_libpqos_ldflags=""
+AC_ARG_WITH(libpqos, [AS_HELP_STRING([--with-libpqos@<:@=PREFIX@:>@], [Path to libpqos.])],
+[
+	if test "x$withval" != "xno" && test "x$withval" != "xyes"
+	then
+		with_libpqos_cppflags="-I$withval/include"
+		with_libpqos_ldflags="-L$withval/lib"
+		with_libpqos="yes"
+	else
+		with_libpqos="$withval"
+	fi
+],
+[
+	with_libpqos="yes"
+])
+if test "x$with_libpqos" = "xyes"
+then
+	SAVE_CPPFLAGS="$CPPFLAGS"
+	CPPFLAGS="$CPPFLAGS $with_libpqos_cppflags"
+
+	AC_CHECK_HEADERS(pqos.h, [with_libpqos="yes"], [with_libpqos="no (pqos.h not found)"])
+
+	CPPFLAGS="$SAVE_CPPFLAGS"
+fi
+if test "x$with_libpqos" = "xyes"
+then
+	SAVE_CPPFLAGS="$CPPFLAGS"
+	SAVE_LDFLAGS="$LDFLAGS"
+	CPPFLAGS="$CPPFLAGS $with_libpqos_cppflags"
+	LDFLAGS="$LDFLAGS $with_libpqos_ldflags"
+
+	AC_CHECK_LIB(pqos, pqos_init, [with_libpqos="yes"], [with_libpqos="no (Can't find libpqos)"])
+
+	CPPFLAGS="$SAVE_CPPFLAGS"
+	LDFLAGS="$SAVE_LDFLAGS"
+fi
+if test "x$with_libpqos" = "xyes"
+then
+	BUILD_WITH_LIBPQOS_CPPFLAGS="$with_libpqos_cppflags"
+	BUILD_WITH_LIBPQOS_LDFLAGS="$with_libpqos_ldflags"
+	BUILD_WITH_LIBPQOS_LIBS="-lpqos"
+	AC_SUBST(BUILD_WITH_LIBPQOS_CPPFLAGS)
+	AC_SUBST(BUILD_WITH_LIBPQOS_LDFLAGS)
+	AC_SUBST(BUILD_WITH_LIBPQOS_LIBS)
+fi
 # }}}
 
 # --with-libprotobuf {{{
@@ -5745,6 +5869,7 @@ plugin_curl_xml="no"
 plugin_df="no"
 plugin_disk="no"
 plugin_drbd="no"
+plugin_dpdk="no"
 plugin_entropy="no"
 plugin_ethstat="no"
 plugin_fhcount="no"
@@ -5752,6 +5877,7 @@ plugin_fscache="no"
 plugin_gps="no"
 plugin_grpc="no"
 plugin_hugepages="no"
+plugin_intel_rdt="no"
 plugin_interface="no"
 plugin_ipmi="no"
 plugin_ipvs="no"
@@ -6195,6 +6321,7 @@ AC_PLUGIN([dbi],                 [$with_libdbi],            [General database st
 AC_PLUGIN([df],                  [$plugin_df],              [Filesystem usage statistics])
 AC_PLUGIN([disk],                [$plugin_disk],            [Disk usage statistics])
 AC_PLUGIN([dns],                 [$with_libpcap],           [DNS traffic analysis])
+AC_PLUGIN([dpdkstat],            [$with_libdpdk],           [Stats & Status from DPDK])
 AC_PLUGIN([drbd],                [$plugin_drbd],            [DRBD statistics])
 AC_PLUGIN([email],               [yes],                     [EMail statistics])
 AC_PLUGIN([entropy],             [$plugin_entropy],         [Entropy statistics])
@@ -6208,6 +6335,7 @@ AC_PLUGIN([gps],                 [$plugin_gps],             [GPS plugin])
 AC_PLUGIN([grpc],                [$plugin_grpc],            [gRPC plugin])
 AC_PLUGIN([hddtemp],             [yes],                     [Query hddtempd])
 AC_PLUGIN([hugepages],           [$plugin_hugepages],       [Hugepages statistics])
+AC_PLUGIN([intel_rdt],           [$with_libpqos],           [Intel RDT monitor plugin])
 AC_PLUGIN([interface],           [$plugin_interface],       [Interface traffic statistics])
 AC_PLUGIN([ipc],                 [$plugin_ipc],             [IPC statistics])
 AC_PLUGIN([ipmi],                [$plugin_ipmi],            [IPMI sensor statistics])
@@ -6535,6 +6663,7 @@ AC_MSG_RESULT([    libaquaero5 . . . . . $with_libaquaero5])
 AC_MSG_RESULT([    libatasmart . . . . . $with_libatasmart])
 AC_MSG_RESULT([    libcurl . . . . . . . $with_libcurl])
 AC_MSG_RESULT([    libdbi  . . . . . . . $with_libdbi])
+AC_MSG_RESULT([    libdpdk . . . . . . . $with_libdpdk])
 AC_MSG_RESULT([    libesmtp  . . . . . . $with_libesmtp])
 AC_MSG_RESULT([    libganglia  . . . . . $with_libganglia])
 AC_MSG_RESULT([    libgcrypt . . . . . . $with_libgcrypt])
@@ -6568,6 +6697,7 @@ AC_MSG_RESULT([    libpcap . . . . . . . $with_libpcap])
 AC_MSG_RESULT([    libperfstat . . . . . $with_perfstat])
 AC_MSG_RESULT([    libperl . . . . . . . $with_libperl])
 AC_MSG_RESULT([    libpq . . . . . . . . $with_libpq])
+AC_MSG_RESULT([    libpqos . . . . . . . $with_libpqos])
 AC_MSG_RESULT([    libprotobuf . . . . . $with_libprotobuf])
 AC_MSG_RESULT([    libprotobuf-c . . . . $with_libprotobuf_c])
 AC_MSG_RESULT([    libpython . . . . . . $with_libpython])
@@ -6626,6 +6756,7 @@ AC_MSG_RESULT([    dbi . . . . . . . . . $enable_dbi])
 AC_MSG_RESULT([    df  . . . . . . . . . $enable_df])
 AC_MSG_RESULT([    disk  . . . . . . . . $enable_disk])
 AC_MSG_RESULT([    dns . . . . . . . . . $enable_dns])
+AC_MSG_RESULT([    dpdkstat . . . . . . .$enable_dpdkstat])
 AC_MSG_RESULT([    drbd  . . . . . . . . $enable_drbd])
 AC_MSG_RESULT([    email . . . . . . . . $enable_email])
 AC_MSG_RESULT([    entropy . . . . . . . $enable_entropy])
@@ -6639,6 +6770,7 @@ AC_MSG_RESULT([    gps . . . . . . . . . $enable_gps])
 AC_MSG_RESULT([    grpc  . . . . . . . . $enable_grpc])
 AC_MSG_RESULT([    hddtemp . . . . . . . $enable_hddtemp])
 AC_MSG_RESULT([    hugepages . . . . . . $enable_hugepages])
+AC_MSG_RESULT([    intel_rdt. . . . .  . $enable_intel_rdt])
 AC_MSG_RESULT([    interface . . . . . . $enable_interface])
 AC_MSG_RESULT([    ipc . . . . . . . . . $enable_ipc])
 AC_MSG_RESULT([    ipmi  . . . . . . . . $enable_ipmi])

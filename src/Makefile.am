@@ -391,6 +391,14 @@ dns_la_LDFLAGS = $(PLUGIN_LDFLAGS)
 dns_la_LIBADD = -lpcap
 endif
 
+if BUILD_PLUGIN_DPDKSTAT
+pkglib_LTLIBRARIES += dpdkstat.la
+dpdkstat_la_SOURCES = dpdkstat.c
+dpdkstat_la_CFLAGS = $(AM_CFLAGS) $(BUILD_WITH_DPDK_CFLAGS)
+dpdkstat_la_LDFLAGS = $(PLUGIN_LDFLAGS) $(BUILD_WITH_DPDK_LDFLAGS)
+dpdkstat_la_LIBADD = $(BUILD_WITH_DPDK_LIBS) 
+endif
+
 if BUILD_PLUGIN_DRBD
 pkglib_LTLIBRARIES += drbd.la
 drbd_la_SOURCES = drbd.c
@@ -955,6 +963,14 @@ protocols_la_SOURCES = protocols.c
 protocols_la_LDFLAGS = $(PLUGIN_LDFLAGS)
 endif
 
+if BUILD_PLUGIN_INTEL_RDT
+pkglib_LTLIBRARIES += intel_rdt.la
+intel_rdt_la_SOURCES = intel_rdt.c
+intel_rdt_la_LDFLAGS = $(PLUGIN_LDFLAGS) $(BUILD_WITH_LIBPQOS_LDFLAGS)
+intel_rdt_la_CFLAGS = $(AM_CFLAGS) $(BUILD_WITH_LIBPQOS_CPPFLAGS)
+intel_rdt_la_LIBADD = $(BUILD_WITH_LIBPQOS_LIBS)
+endif
+
 if BUILD_PLUGIN_REDIS
 pkglib_LTLIBRARIES += redis.la
 redis_la_SOURCES = redis.c
@@ -1286,6 +1302,7 @@ pkglib_LTLIBRARIES += write_log.la
 write_log_la_SOURCES = write_log.c \
                         utils_format_graphite.c utils_format_graphite.h
 write_log_la_LDFLAGS = $(PLUGIN_LDFLAGS)
+write_log_la_LIBADD = libformat_json.la
 endif
 
 if BUILD_PLUGIN_WRITE_MONGODB
