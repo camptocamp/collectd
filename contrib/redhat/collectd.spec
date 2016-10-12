@@ -227,8 +227,8 @@
 
 Summary:	Statistics collection and monitoring daemon
 Name:		collectd
-Version:	5.7.0
-Release:	2%{?dist}
+Version:	5.6.1
+Release:	1%{?dist}
 URL:		https://collectd.org
 Source:		https://collectd.org/files/%{name}-%{version}.tar.bz2
 License:	GPLv2
@@ -2524,7 +2524,7 @@ fi
 %doc contrib/
 
 %changelog
-* Wed Sep 09 2016 Marc Fournier <marc.fournier@camptocamp.com> 5.6.0-2
+* Wed Oct 12 2016 Marc Fournier <marc.fournier@camptocamp.com> 5.6.1-2
 - Custom build from current master
 - Bump DATA_MAX_NAME_LEN to 512
 - Added custom patches:
@@ -2535,12 +2535,11 @@ fi
   * #836 file descriptor count
   * #1700 tail plugin latency
 
-* Tue Aug 23 2016 Marc Fournier <marc.fournier@camptocamp.com> - 5.7.0-1
-- New PRE-RELEASE version
-- New plugins enabled by default: hugepages
+* Mon Oct 10 2016 Victor Demonchy <v.demonchy@criteo.com> - 5.6.1-1
+- New upstream version
 
 * Sun Aug 14 2016 Ruben Kerkhof <ruben@rubenkerkhof.com> - 5.6.0-1
-- New PRE-RELEASE version
+- New upstream version
 - New plugins enabled by default: chrony, cpusleep, gps, lua, mqtt, notify_nagios
 - New plugins disabled by default: grpc, xencpu, zone
 
