@@ -2533,7 +2533,6 @@ fi
   * #1109 nfs client stats
   * #547 named threads
   * #836 file descriptor count
-  * #1867 Making /proc and /sys path configurable
   * #1700 tail plugin latency
 
 * Tue Aug 23 2016 Marc Fournier <marc.fournier@camptocamp.com> - 5.7.0-1
