@@ -2571,6 +2571,8 @@ fi
   * #547 named threads
   * #836 file descriptor count
   * #1700 tail plugin latency
+  * #1967 write_prometheus
+  * contrib-docker LD_PRELOAD wrapper
 
 * Mon Oct 10 2016 Marc Fournier <marc.fournier@camptocamp.com> - 5.7.0-1
 - New PRE-RELEASE version
