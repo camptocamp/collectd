@@ -1766,6 +1766,8 @@ Collectd utilities
 
 %configure CFLAGS="%{optflags} -DLT_LAZY_OR_NOW=\"RTLD_LAZY|RTLD_GLOBAL\"" \
 	%{?_python_config} \
+	--enable-debug \
+	--with-data-max-name-len=512 \
 	--disable-static \
 	--without-included-ltdl \
 	--enable-all-plugins=yes \
@@ -2587,6 +2589,14 @@ fi
 %doc contrib/
 
 %changelog
+* Mon Jan 09 2017 Marc Fournier <marc.fournier@camptocamp.com> - 5.7.0-3
+- Custom build from current collectd-5.7 branch
+- build with debug enabled
+- build with DATA_MAX_NAME_LEN set to 512
+- Added custom patches:
+  * #1989 open files count
+  * contrib-docker LD_PRELOAD wrapper
+
 * Tue Nov 29 2016 Ruben Kerkhof <ruben@rubenkerkhof.com> - 5.7.0-2
 - Disable redis plugin on RHEL 6, hiredis has been retired from EPEL6
 
