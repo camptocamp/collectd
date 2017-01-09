@@ -32,7 +32,6 @@
  *   Manuel Sanmartin
  *   Clément Stenac <clement.stenac at diwi.org>
  *   Cosmin Ioiart <cioiart at gmail.com>
- *   Pavel Rochnyack <pavel2000 at ngs.ru>
  **/
 
 #include "collectd.h"
@@ -160,14 +159,12 @@
 #endif
 #endif
 
-#define PROCSTAT_NAME_LEN 256
-typedef struct process_entry_s {
+typedef struct procstat_entry_s {
   unsigned long id;
-  char name[PROCSTAT_NAME_LEN];
+  unsigned long age;
 
   unsigned long num_proc;
   unsigned long num_lwp;
-  unsigned long num_fd;
   unsigned long vmem_size;
   unsigned long vmem_rss;
   unsigned long vmem_data;
@@ -191,31 +188,10 @@ typedef struct process_entry_s {
   derive_t cswitch_invol;
   _Bool has_cswitch;
 
-  _Bool has_fd;
-} process_entry_t;
-
-typedef struct procstat_entry_s {
-  unsigned long id;
-  unsigned long age;
-
-  derive_t vmem_minflt_counter;
-  derive_t vmem_majflt_counter;
-
-  derive_t cpu_user_counter;
-  derive_t cpu_system_counter;
-
-  /* io data */
-  derive_t io_rchar;
-  derive_t io_wchar;
-  derive_t io_syscr;
-  derive_t io_syscw;
-
-  derive_t cswitch_vol;
-  derive_t cswitch_invol;
-
   struct procstat_entry_s *next;
 } procstat_entry_t;
 
+#define PROCSTAT_NAME_LEN 256
 typedef struct procstat {
   char name[PROCSTAT_NAME_LEN];
 #if HAVE_REGEX_H
@@ -224,7 +200,6 @@ typedef struct procstat {
 
   unsigned long num_proc;
   unsigned long num_lwp;
-  unsigned long num_fd;
   unsigned long vmem_size;
   unsigned long vmem_rss;
   unsigned long vmem_data;
@@ -246,9 +221,6 @@ typedef struct procstat {
   derive_t cswitch_vol;
   derive_t cswitch_invol;
 
-  _Bool report_fd_num;
-  _Bool report_ctx_switch;
-
   struct procstat *next;
   struct procstat_entry_s *instances;
 } procstat_t;
@@ -257,7 +229,6 @@ static procstat_t *list_head_g = NULL;
 
 static _Bool want_init = 1;
 static _Bool report_ctx_switch = 0;
-static _Bool report_fd_num = 0;
 
 #if HAVE_THREAD_INFO
 static mach_port_t port_host_self;
@@ -269,7 +240,7 @@ static mach_msg_type_number_t pset_list_len;
 
 #elif KERNEL_LINUX
 static long pagesize_g;
-static void ps_fill_details(const procstat_t *ps, process_entry_t *entry);
+static void ps_fill_details(const procstat_t *ps, procstat_entry_t *entry);
 /* #endif KERNEL_LINUX */
 
 #elif HAVE_LIBKVM_GETPROCS &&                                                  \
@@ -294,7 +265,7 @@ int getargs(void *processBuffer, int bufferLen, char *argsBuffer, int argsLen);
 /* put name of process from config to list_head_g tree
  * list_head_g is a list of 'procstat_t' structs with
  * processes names we want to watch */
-static procstat_t *ps_list_register(const char *name, const char *regexp) {
+static void ps_list_register(const char *name, const char *regexp) {
   procstat_t *new;
   procstat_t *ptr;
   int status;
@@ -302,19 +273,9 @@ static procstat_t *ps_list_register(const char *name, const char *regexp) {
   new = calloc(1, sizeof(*new));
   if (new == NULL) {
     ERROR("processes plugin: ps_list_register: calloc failed.");
-    return (NULL);
+    return;
   }
   sstrncpy(new->name, name, sizeof(new->name));
-
-  new->io_rchar = -1;
-  new->io_wchar = -1;
-  new->io_syscr = -1;
-  new->io_syscw = -1;
-  new->cswitch_vol = -1;
-  new->cswitch_invol = -1;
-
-  new->report_fd_num = report_fd_num;
-  new->report_ctx_switch = report_ctx_switch;
 
 #if HAVE_REGEX_H
   if (regexp != NULL) {
@@ -324,7 +285,7 @@ static procstat_t *ps_list_register(const char *name, const char *regexp) {
     if (new->re == NULL) {
       ERROR("processes plugin: ps_list_register: malloc failed.");
       sfree(new);
-      return (NULL);
+      return;
     }
 
     status = regcomp(new->re, regexp, REG_EXTENDED | REG_NOSUB);
@@ -333,7 +294,7 @@ static procstat_t *ps_list_register(const char *name, const char *regexp) {
             regexp);
       sfree(new->re);
       sfree(new);
-      return (NULL);
+      return;
     }
   }
 #else
@@ -344,7 +305,7 @@ static procstat_t *ps_list_register(const char *name, const char *regexp) {
           "has been disabled at compile time.",
           regexp);
     sfree(new);
-    return (NULL);
+    return;
   }
 #endif
 
@@ -359,7 +320,7 @@ static procstat_t *ps_list_register(const char *name, const char *regexp) {
       sfree(new->re);
 #endif
       sfree(new);
-      return (NULL);
+      return;
     }
 
     if (ptr->next == NULL)
@@ -370,8 +331,6 @@ static procstat_t *ps_list_register(const char *name, const char *regexp) {
     list_head_g = new;
   else
     ptr->next = new;
-
-  return (new);
 } /* void ps_list_register */
 
 /* try to match name against entry, returns 1 if success */
@@ -416,16 +375,13 @@ static void ps_update_counter(derive_t *group_counter, derive_t *curr_counter,
   else
     curr_value = new_counter - *curr_counter;
 
-  if (*group_counter == -1)
-    *group_counter = 0;
-
   *curr_counter = new_counter;
   *group_counter += curr_value;
 }
 
 /* add process entry to 'instances' of process 'name' (or refresh it) */
 static void ps_list_add(const char *name, const char *cmdline,
-                        process_entry_t *entry) {
+                        procstat_entry_t *entry) {
   procstat_entry_t *pse;
 
   if (entry->id == 0)
@@ -460,32 +416,35 @@ static void ps_list_add(const char *name, const char *cmdline,
     }
 
     pse->age = 0;
+    pse->num_proc = entry->num_proc;
+    pse->num_lwp = entry->num_lwp;
+    pse->vmem_size = entry->vmem_size;
+    pse->vmem_rss = entry->vmem_rss;
+    pse->vmem_data = entry->vmem_data;
+    pse->vmem_code = entry->vmem_code;
+    pse->stack_size = entry->stack_size;
+    pse->io_rchar = entry->io_rchar;
+    pse->io_wchar = entry->io_wchar;
+    pse->io_syscr = entry->io_syscr;
+    pse->io_syscw = entry->io_syscw;
+    pse->cswitch_vol = entry->cswitch_vol;
+    pse->cswitch_invol = entry->cswitch_invol;
 
-    ps->num_proc += entry->num_proc;
-    ps->num_lwp += entry->num_lwp;
-    ps->num_fd += entry->num_fd;
-    ps->vmem_size += entry->vmem_size;
-    ps->vmem_rss += entry->vmem_rss;
-    ps->vmem_data += entry->vmem_data;
-    ps->vmem_code += entry->vmem_code;
-    ps->stack_size += entry->stack_size;
+    ps->num_proc += pse->num_proc;
+    ps->num_lwp += pse->num_lwp;
+    ps->vmem_size += pse->vmem_size;
+    ps->vmem_rss += pse->vmem_rss;
+    ps->vmem_data += pse->vmem_data;
+    ps->vmem_code += pse->vmem_code;
+    ps->stack_size += pse->stack_size;
 
-    if ((entry->io_rchar != -1) && (entry->io_wchar != -1)) {
-      ps_update_counter(&ps->io_rchar, &pse->io_rchar, entry->io_rchar);
-      ps_update_counter(&ps->io_wchar, &pse->io_wchar, entry->io_wchar);
-    }
+    ps->io_rchar += ((pse->io_rchar == -1) ? 0 : pse->io_rchar);
+    ps->io_wchar += ((pse->io_wchar == -1) ? 0 : pse->io_wchar);
+    ps->io_syscr += ((pse->io_syscr == -1) ? 0 : pse->io_syscr);
+    ps->io_syscw += ((pse->io_syscw == -1) ? 0 : pse->io_syscw);
 
-    if ((entry->io_syscr != -1) && (entry->io_syscw != -1)) {
-      ps_update_counter(&ps->io_syscr, &pse->io_syscr, entry->io_syscr);
-      ps_update_counter(&ps->io_syscw, &pse->io_syscw, entry->io_syscw);
-    }
-
-    if ((entry->cswitch_vol != -1) && (entry->cswitch_vol != -1)) {
-      ps_update_counter(&ps->cswitch_vol, &pse->cswitch_vol,
-                        entry->cswitch_vol);
-      ps_update_counter(&ps->cswitch_invol, &pse->cswitch_invol,
-                        entry->cswitch_invol);
-    }
+    ps->cswitch_vol += ((pse->cswitch_vol == -1) ? 0 : pse->cswitch_vol);
+    ps->cswitch_invol += ((pse->cswitch_invol == -1) ? 0 : pse->cswitch_invol);
 
     ps_update_counter(&ps->vmem_minflt_counter, &pse->vmem_minflt_counter,
                       entry->vmem_minflt_counter);
@@ -507,12 +466,17 @@ static void ps_list_reset(void) {
   for (procstat_t *ps = list_head_g; ps != NULL; ps = ps->next) {
     ps->num_proc = 0;
     ps->num_lwp = 0;
-    ps->num_fd = 0;
     ps->vmem_size = 0;
     ps->vmem_rss = 0;
     ps->vmem_data = 0;
     ps->vmem_code = 0;
     ps->stack_size = 0;
+    ps->io_rchar = -1;
+    ps->io_wchar = -1;
+    ps->io_syscr = -1;
+    ps->io_syscw = -1;
+    ps->cswitch_vol = -1;
+    ps->cswitch_invol = -1;
 
     pse_prev = NULL;
     pse = ps->instances;
@@ -540,20 +504,6 @@ static void ps_list_reset(void) {
   }   /* for (ps = list_head_g; ps != NULL; ps = ps->next) */
 }
 
-static void ps_tune_instance(oconfig_item_t *ci, procstat_t *ps) {
-  for (int i = 0; i < ci->children_num; i++) {
-    oconfig_item_t *c = ci->children + i;
-
-    if (strcasecmp(c->key, "CollectContextSwitch") == 0)
-      cf_util_get_boolean(c, &ps->report_ctx_switch);
-    else if (strcasecmp(c->key, "CollectFileDescriptor") == 0)
-      cf_util_get_boolean(c, &ps->report_fd_num);
-    else {
-      ERROR("processes plugin: Option `%s' not allowed here.", c->key);
-    }
-  } /* for (ci->children) */
-} /* void ps_tune_instance */
-
 /* put all pre-defined 'Process' names from config to list_head_g tree */
 static int ps_config(oconfig_item_t *ci) {
 #if KERNEL_LINUX
@@ -561,8 +511,6 @@ static int ps_config(oconfig_item_t *ci) {
 #elif KERNEL_SOLARIS || KERNEL_FREEBSD
   const size_t max_procname_len = MAXCOMLEN - 1;
 #endif
-
-  procstat_t *ps;
 
   for (int i = 0; i < ci->children_num; ++i) {
     oconfig_item_t *c = ci->children + i;
@@ -575,6 +523,13 @@ static int ps_config(oconfig_item_t *ci) {
         continue;
       }
 
+      if (c->children_num != 0) {
+        WARNING("processes plugin: the `Process' config option "
+                "does not expect any child elements -- ignoring "
+                "content (%i elements) of the <Process '%s'> block.",
+                c->children_num, c->values[0].value.string);
+      }
+
 #if KERNEL_LINUX || KERNEL_SOLARIS || KERNEL_FREEBSD
       if (strlen(c->values[0].value.string) > max_procname_len) {
         WARNING("processes plugin: this platform has a %zu character limit "
@@ -584,10 +539,7 @@ static int ps_config(oconfig_item_t *ci) {
       }
 #endif
 
-      ps = ps_list_register(c->values[0].value.string, NULL);
-
-      if (c->children_num != 0 && ps != NULL)
-        ps_tune_instance(c, ps);
+      ps_list_register(c->values[0].value.string, NULL);
     } else if (strcasecmp(c->key, "ProcessMatch") == 0) {
       if ((c->values_num != 2) || (OCONFIG_TYPE_STRING != c->values[0].type) ||
           (OCONFIG_TYPE_STRING != c->values[1].type)) {
@@ -597,15 +549,18 @@ static int ps_config(oconfig_item_t *ci) {
         continue;
       }
 
-      ps = ps_list_register(c->values[0].value.string,
-                            c->values[1].value.string);
+      if (c->children_num != 0) {
+        WARNING("processes plugin: the `ProcessMatch' config option "
+                "does not expect any child elements -- ignoring "
+                "content (%i elements) of the <ProcessMatch '%s' '%s'> "
+                "block.",
+                c->children_num, c->values[0].value.string,
+                c->values[1].value.string);
+      }
 
-      if (c->children_num != 0 && ps != NULL)
-        ps_tune_instance(c, ps);
+      ps_list_register(c->values[0].value.string, c->values[1].value.string);
     } else if (strcasecmp(c->key, "CollectContextSwitch") == 0) {
       cf_util_get_boolean(c, &report_ctx_switch);
-    } else if (strcasecmp(c->key, "CollectFileDescriptor") == 0) {
-      cf_util_get_boolean(c, &report_fd_num);
     } else {
       ERROR("processes plugin: The `%s' configuration option is not "
             "understood and will be ignored.",
@@ -740,14 +695,7 @@ static void ps_submit_proc_list(procstat_t *ps) {
     plugin_dispatch_values(&vl);
   }
 
-  if (ps->num_fd > 0) {
-    sstrncpy(vl.type, "file_handles", sizeof(vl.type));
-    vl.values[0].gauge = ps->num_fd;
-    vl.values_len = 1;
-    plugin_dispatch_values(&vl);
-  }
-
-  if ((ps->cswitch_vol != -1) && (ps->cswitch_invol != -1)) {
+  if (report_ctx_switch) {
     sstrncpy(vl.type, "contextswitch", sizeof(vl.type));
     sstrncpy(vl.type_instance, "voluntary", sizeof(vl.type_instance));
     vl.values[0].derive = ps->cswitch_vol;
@@ -761,7 +709,7 @@ static void ps_submit_proc_list(procstat_t *ps) {
     plugin_dispatch_values(&vl);
   }
 
-  DEBUG("name = %s; num_proc = %lu; num_lwp = %lu; num_fd = %lu; "
+  DEBUG("name = %s; num_proc = %lu; num_lwp = %lu; "
         "vmem_size = %lu; vmem_rss = %lu; vmem_data = %lu; "
         "vmem_code = %lu; "
         "vmem_minflt_counter = %" PRIi64 "; vmem_majflt_counter = %" PRIi64 "; "
@@ -769,8 +717,8 @@ static void ps_submit_proc_list(procstat_t *ps) {
         "io_rchar = %" PRIi64 "; io_wchar = %" PRIi64 "; "
         "io_syscr = %" PRIi64 "; io_syscw = %" PRIi64 "; "
         "cswitch_vol = %" PRIi64 "; cswitch_invol = %" PRIi64 ";",
-        ps->name, ps->num_proc, ps->num_lwp, ps->num_fd, ps->vmem_size,
-        ps->vmem_rss, ps->vmem_data, ps->vmem_code, ps->vmem_minflt_counter,
+        ps->name, ps->num_proc, ps->num_lwp, ps->vmem_size, ps->vmem_rss,
+        ps->vmem_data, ps->vmem_code, ps->vmem_minflt_counter,
         ps->vmem_majflt_counter, ps->cpu_user_counter, ps->cpu_system_counter,
         ps->io_rchar, ps->io_wchar, ps->io_syscr, ps->io_syscw, ps->cswitch_vol,
         ps->cswitch_invol);
@@ -793,7 +741,7 @@ static void ps_submit_fork_rate(derive_t value) {
 
 /* ------- additional functions for KERNEL_LINUX/HAVE_THREAD_INFO ------- */
 #if KERNEL_LINUX
-static int ps_read_tasks_status(process_entry_t *ps) {
+static int ps_read_tasks_status(procstat_entry_t *ps) {
   char dirname[64];
   DIR *dh;
   char filename[64];
@@ -867,7 +815,7 @@ static int ps_read_tasks_status(process_entry_t *ps) {
 } /* int *ps_read_tasks_status */
 
 /* Read data from /proc/pid/status */
-static int ps_read_status(long pid, process_entry_t *ps) {
+static procstat_t *ps_read_status(long pid, procstat_t *ps) {
   FILE *fh;
   char buffer[1024];
   char filename[64];
@@ -880,7 +828,7 @@ static int ps_read_status(long pid, process_entry_t *ps) {
 
   ssnprintf(filename, sizeof(filename), "/proc/%li/status", pid);
   if ((fh = fopen(filename, "r")) == NULL)
-    return (-1);
+    return (NULL);
 
   while (fgets(buffer, sizeof(buffer), fh) != NULL) {
     unsigned long tmp;
@@ -920,10 +868,10 @@ static int ps_read_status(long pid, process_entry_t *ps) {
   if (threads != 0)
     ps->num_lwp = threads;
 
-  return (0);
-} /* int *ps_read_status */
+  return (ps);
+} /* procstat_t *ps_read_vmem */
 
-static int ps_read_io(process_entry_t *ps) {
+static int ps_read_io(procstat_entry_t *ps) {
   FILE *fh;
   char buffer[1024];
   char filename[64];
@@ -932,10 +880,8 @@ static int ps_read_io(process_entry_t *ps) {
   int numfields;
 
   ssnprintf(filename, sizeof(filename), "/proc/%li/io", ps->id);
-  if ((fh = fopen(filename, "r")) == NULL) {
-    DEBUG("ps_read_io: Failed to open file `%s'", filename);
+  if ((fh = fopen(filename, "r")) == NULL)
     return (-1);
-  }
 
   while (fgets(buffer, sizeof(buffer), fh) != NULL) {
     derive_t *val = NULL;
@@ -974,52 +920,32 @@ static int ps_read_io(process_entry_t *ps) {
   return (0);
 } /* int ps_read_io (...) */
 
-static int ps_count_fd(int pid) {
-  char dirname[64];
-  DIR *dh;
-  struct dirent *ent;
-  int count = 0;
+static void ps_fill_details(const procstat_t *ps, procstat_entry_t *entry) {
+  if (entry->has_io == 0 && ps_read_io(entry) != 0) {
+    /* no io data */
+    entry->io_rchar = -1;
+    entry->io_wchar = -1;
+    entry->io_syscr = -1;
+    entry->io_syscw = -1;
 
-  ssnprintf(dirname, sizeof(dirname), "/proc/%i/fd", pid);
-
-  if ((dh = opendir(dirname)) == NULL) {
-    DEBUG("Failed to open directory `%s'", dirname);
-    return (-1);
+    DEBUG("ps_read_process: not get io data for pid %li", entry->id);
   }
-  while ((ent = readdir(dh)) != NULL) {
-    if (!isdigit((int)ent->d_name[0]))
-      continue;
-    else
-      count++;
-  }
-  closedir(dh);
+  entry->has_io = 1;
 
-  return ((count >= 1) ? count : 1);
-} /* int ps_count_fd (pid) */
+  if (report_ctx_switch) {
+    if (entry->has_cswitch == 0 && ps_read_tasks_status(entry) != 0) {
+      entry->cswitch_vol = -1;
+      entry->cswitch_invol = -1;
 
-static void ps_fill_details(const procstat_t *ps, process_entry_t *entry) {
-  if (entry->has_io == 0) {
-    ps_read_io(entry);
-    entry->has_io = 1;
-  }
-
-  if (ps->report_ctx_switch) {
-    if (entry->has_cswitch == 0) {
-      ps_read_tasks_status(entry);
-      entry->has_cswitch = 1;
+      DEBUG("ps_read_tasks_status: not get context "
+            "switch data for pid %li",
+            entry->id);
     }
-  }
-
-  if (ps->report_fd_num) {
-    int num_fd;
-    if (entry->has_fd == 0 && (num_fd = ps_count_fd(entry->id)) > 0) {
-      entry->num_fd = num_fd;
-    }
-    entry->has_fd = 1;
+    entry->has_cswitch = 1;
   }
 } /* void ps_fill_details (...) */
 
-static int ps_read_process(long pid, process_entry_t *ps, char *state) {
+static int ps_read_process(long pid, procstat_t *ps, char *state) {
   char filename[64];
   char buffer[1024];
 
@@ -1040,6 +966,8 @@ static int ps_read_process(long pid, process_entry_t *ps, char *state) {
   long long unsigned stack_size;
 
   ssize_t status;
+
+  memset(ps, 0, sizeof(procstat_t));
 
   ssnprintf(filename, sizeof(filename), "/proc/%li/stat", pid);
 
@@ -1095,7 +1023,7 @@ static int ps_read_process(long pid, process_entry_t *ps, char *state) {
     ps->num_proc = 0;
   } else {
     ps->num_lwp = strtoul(fields[17], /* endptr = */ NULL, /* base = */ 10);
-    if ((ps_read_status(pid, ps)) != 0) {
+    if ((ps_read_status(pid, ps)) == NULL) {
       /* No VMem data */
       ps->vmem_data = -1;
       ps->vmem_code = -1;
@@ -1139,15 +1067,6 @@ static int ps_read_process(long pid, process_entry_t *ps, char *state) {
   ps->vmem_size = (unsigned long)vmem_size;
   ps->vmem_rss = (unsigned long)vmem_rss;
   ps->stack_size = (unsigned long)stack_size;
-
-  /* no data by default. May be filled by ps_fill_details () */
-  ps->io_rchar = -1;
-  ps->io_wchar = -1;
-  ps->io_syscr = -1;
-  ps->io_syscw = -1;
-
-  ps->cswitch_vol = -1;
-  ps->cswitch_invol = -1;
 
   /* success */
   return (0);
@@ -1320,7 +1239,7 @@ static char *ps_get_cmdline(long pid,
  * The values for input and ouput chars are calculated "by hand"
  * Added a few "solaris" specific process states as well
  */
-static int ps_read_process(long pid, process_entry_t *ps, char *state) {
+static int ps_read_process(long pid, procstat_t *ps, char *state) {
   char filename[64];
   char f_psinfo[64], f_usage[64];
   char *buffer;
@@ -1383,11 +1302,6 @@ static int ps_read_process(long pid, process_entry_t *ps, char *state) {
   ps->vmem_data = -1;
   ps->vmem_code = -1;
   ps->stack_size = myStatus->pr_stksize;
-
-  /*
-   * TODO: File descriptor count for Solaris
-   */
-  ps->num_fd = 0;
 
   /*
    * Calculating input/ouput chars
@@ -1530,7 +1444,7 @@ static int ps_read(void) {
   int blocked = 0;
 
   procstat_t *ps;
-  process_entry_t pse;
+  procstat_entry_t pse;
 
   ps_list_reset();
 
@@ -1611,14 +1525,6 @@ static int ps_read(void) {
         /* Does not seem to be easily exposed */
         pse.vmem_data = 0;
         pse.vmem_code = 0;
-
-        pse.io_rchar = -1;
-        pse.io_wchar = -1;
-        pse.io_syscr = -1;
-        pse.io_syscw = -1;
-
-        /* File descriptor count not implemented */
-        pse.num_fd = 0;
 
         pse.vmem_minflt_counter = task_events_info.cow_faults;
         pse.vmem_majflt_counter = task_events_info.faults;
@@ -1751,7 +1657,8 @@ static int ps_read(void) {
   char cmdline[CMDLINE_BUFFER_SIZE];
 
   int status;
-  process_entry_t pse;
+  procstat_t ps;
+  procstat_entry_t pse;
   char state;
 
   running = sleeping = zombies = stopped = paging = blocked = 0;
@@ -1770,14 +1677,37 @@ static int ps_read(void) {
     if ((pid = atol(ent->d_name)) < 1)
       continue;
 
-    memset(&pse, 0, sizeof(pse));
-    pse.id = pid;
-
-    status = ps_read_process(pid, &pse, &state);
+    status = ps_read_process(pid, &ps, &state);
     if (status != 0) {
       DEBUG("ps_read_process failed: %i", status);
       continue;
     }
+
+    memset(&pse, 0, sizeof(pse));
+    pse.id = pid;
+    pse.age = 0;
+
+    pse.num_proc = ps.num_proc;
+    pse.num_lwp = ps.num_lwp;
+    pse.vmem_size = ps.vmem_size;
+    pse.vmem_rss = ps.vmem_rss;
+    pse.vmem_data = ps.vmem_data;
+    pse.vmem_code = ps.vmem_code;
+    pse.stack_size = ps.stack_size;
+
+    pse.vmem_minflt_counter = ps.vmem_minflt_counter;
+    pse.vmem_majflt_counter = ps.vmem_majflt_counter;
+
+    pse.cpu_user_counter = ps.cpu_user_counter;
+    pse.cpu_system_counter = ps.cpu_system_counter;
+
+    pse.io_rchar = ps.io_rchar;
+    pse.io_wchar = ps.io_wchar;
+    pse.io_syscr = ps.io_syscr;
+    pse.io_syscw = ps.io_syscw;
+
+    pse.cswitch_vol = ps.cswitch_vol;
+    pse.cswitch_invol = ps.cswitch_invol;
 
     switch (state) {
     case 'R':
@@ -1800,8 +1730,8 @@ static int ps_read(void) {
       break;
     }
 
-    ps_list_add(pse.name,
-                ps_get_cmdline(pid, pse.name, cmdline, sizeof(cmdline)), &pse);
+    ps_list_add(ps.name, ps_get_cmdline(pid, ps.name, cmdline, sizeof(cmdline)),
+                &pse);
   }
 
   closedir(proc);
@@ -1834,7 +1764,7 @@ static int ps_read(void) {
   struct kinfo_proc *proc_ptr = NULL;
   int count; /* returns number of processes */
 
-  process_entry_t pse;
+  procstat_entry_t pse;
 
   ps_list_reset();
 
@@ -1884,8 +1814,8 @@ static int ps_read(void) {
         }
       } /* if (process has argument list) */
 
-      memset(&pse, 0, sizeof(pse));
       pse.id = procs[i].ki_pid;
+      pse.age = 0;
 
       pse.num_proc = 1;
       pse.num_lwp = procs[i].ki_numthreads;
@@ -1919,9 +1849,6 @@ static int ps_read(void) {
       pse.io_wchar = -1;
       pse.io_syscr = -1;
       pse.io_syscw = -1;
-
-      /* file descriptor count not implemented */
-      pse.num_fd = 0;
 
       /* context switch counters not implemented */
       pse.cswitch_vol = -1;
@@ -1984,7 +1911,7 @@ static int ps_read(void) {
   struct kinfo_proc *proc_ptr = NULL;
   int count; /* returns number of processes */
 
-  process_entry_t pse;
+  procstat_entry_t pse;
 
   ps_list_reset();
 
@@ -2036,6 +1963,7 @@ static int ps_read(void) {
 
       memset(&pse, 0, sizeof(pse));
       pse.id = procs[i].p_pid;
+      pse.age = 0;
 
       pse.num_proc = 1;
       pse.num_lwp = 1; /* XXX: accumulate p_tid values for a single p_pid ? */
@@ -2058,9 +1986,6 @@ static int ps_read(void) {
       pse.io_wchar = -1;
       pse.io_syscr = -1;
       pse.io_syscw = -1;
-
-      /* file descriptor count not implemented */
-      pse.num_fd = 0;
 
       /* context switch counters not implemented */
       pse.cswitch_vol = -1;
@@ -2120,7 +2045,7 @@ static int ps_read(void) {
   pid_t pindex = 0;
   int nprocs;
 
-  process_entry_t pse;
+  procstat_entry_t pse;
 
   ps_list_reset();
   while ((nprocs = getprocs64(procentry, sizeof(struct procentry64),
@@ -2160,9 +2085,8 @@ static int ps_read(void) {
         }
       }
 
-      memset(&pse, 0, sizeof(pse));
-
       pse.id = procentry[i].pi_pid;
+      pse.age = 0;
       pse.num_lwp = procentry[i].pi_thcount;
       pse.num_proc = 1;
 
@@ -2203,6 +2127,7 @@ static int ps_read(void) {
       pse.cpu_user_counter = procentry[i].pi_ru.ru_utime.tv_sec * 1000000 +
                              procentry[i].pi_ru.ru_utime.tv_usec / 1000;
 
+      pse.cpu_system = 0;
       /* tv_usec is nanosec ??? */
       pse.cpu_system_counter = procentry[i].pi_ru.ru_stime.tv_sec * 1000000 +
                                procentry[i].pi_ru.ru_stime.tv_usec / 1000;
@@ -2212,7 +2137,7 @@ static int ps_read(void) {
 
       pse.vmem_size = procentry[i].pi_tsize + procentry[i].pi_dvm * pagesize;
       pse.vmem_rss = (procentry[i].pi_drss + procentry[i].pi_trss) * pagesize;
-      /* Not supported/implemented */
+      /* Not supported */
       pse.vmem_data = 0;
       pse.vmem_code = 0;
       pse.stack_size = 0;
@@ -2221,8 +2146,6 @@ static int ps_read(void) {
       pse.io_wchar = -1;
       pse.io_syscr = -1;
       pse.io_syscw = -1;
-
-      pse.num_fd = 0;
 
       pse.cswitch_vol = -1;
       pse.cswitch_invol = -1;
@@ -2276,7 +2199,8 @@ static int ps_read(void) {
 
   while ((ent = readdir(proc)) != NULL) {
     long pid;
-    process_entry_t pse;
+    struct procstat ps;
+    procstat_entry_t pse;
     char *endptr;
 
     if (!isdigit((int)ent->d_name[0]))
@@ -2286,14 +2210,37 @@ static int ps_read(void) {
     if (*endptr != 0) /* value didn't completely parse as a number */
       continue;
 
-    memset(&pse, 0, sizeof(pse));
-    pse.id = pid;
-
-    status = ps_read_process(pid, &pse, &state);
+    status = ps_read_process(pid, &ps, &state);
     if (status != 0) {
       DEBUG("ps_read_process failed: %i", status);
       continue;
     }
+
+    memset(&pse, 0, sizeof(pse));
+    pse.id = pid;
+    pse.age = 0;
+
+    pse.num_proc = ps.num_proc;
+    pse.num_lwp = ps.num_lwp;
+    pse.vmem_size = ps.vmem_size;
+    pse.vmem_rss = ps.vmem_rss;
+    pse.vmem_data = ps.vmem_data;
+    pse.vmem_code = ps.vmem_code;
+    pse.stack_size = ps.stack_size;
+
+    pse.vmem_minflt_counter = ps.vmem_minflt_counter;
+    pse.vmem_majflt_counter = ps.vmem_majflt_counter;
+
+    pse.cpu_user_counter = ps.cpu_user_counter;
+    pse.cpu_system_counter = ps.cpu_system_counter;
+
+    pse.io_rchar = ps.io_rchar;
+    pse.io_wchar = ps.io_wchar;
+    pse.io_syscr = ps.io_syscr;
+    pse.io_syscw = ps.io_syscw;
+
+    pse.cswitch_vol = -1;
+    pse.cswitch_invol = -1;
 
     switch (state) {
     case 'R':
@@ -2322,8 +2269,8 @@ static int ps_read(void) {
       break;
     }
 
-    ps_list_add(pse.name,
-                ps_get_cmdline(pid, pse.name, cmdline, sizeof(cmdline)), &pse);
+    ps_list_add(ps.name, ps_get_cmdline(pid, ps.name, cmdline, sizeof(cmdline)),
+                &pse);
   } /* while(readdir) */
   closedir(proc);
 
