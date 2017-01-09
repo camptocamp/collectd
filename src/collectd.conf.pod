@@ -6219,9 +6219,15 @@ C<I<prefix>/var/run/collectd-powerdns>.
 =item B<Process> I<Name>
 
 Select more detailed statistics of processes matching this name. The statistics
-collected for these selected processes are size of the resident segment size
-(RSS), user- and system-time used, number of processes and number of threads,
-io data (where available) and minor and major pagefaults.
+collected for these selected processes are:
+ - size of the resident segment size (RSS)
+ - user- and system-time used
+ - number of processes
+ - number of threads
+ - number of open files
+ - io data (where available)
+ - context switches
+ - minor and major pagefaults.
 
 Some platforms have a limit on the length of process names. I<Name> must stay
 below this limit.
@@ -6239,7 +6245,14 @@ slashes.
 
 Collect context switch of the process.
 
+=item B<CollectFileDescriptor> I<Boolean>
+
+Collect number of open file descriptors of the process.
+
 =back
+
+Options B<CollectContextSwitch> and B<CollectFileDescriptor> can be set per
+B<Process> or B<ProcessMatch> in the corresponding block.
 
 =head2 Plugin C<protocols>
 
