@@ -237,7 +237,7 @@
 Summary:	Statistics collection and monitoring daemon
 Name:		collectd
 Version:	5.7.0
-Release:	2%{?dist}
+Release:	4%{?dist}
 URL:		https://collectd.org
 Source:		https://collectd.org/files/%{name}-%{version}.tar.bz2
 License:	GPLv2
@@ -2590,13 +2590,14 @@ fi
 %doc contrib/
 
 %changelog
-* Mon Jan 09 2017 Marc Fournier <marc.fournier@camptocamp.com> - 5.7.0-3
+* Mon Jan 09 2017 Marc Fournier <marc.fournier@camptocamp.com> - 5.7.0-4
 - Custom build from current collectd-5.7 branch
 - build with debug enabled
 - build with DATA_MAX_NAME_LEN set to 512
 - Added custom patches:
   * #1989 open files count
   * contrib-docker LD_PRELOAD wrapper
+  * #2138 log to stderr by default
 
 * Tue Nov 29 2016 Ruben Kerkhof <ruben@rubenkerkhof.com> - 5.7.0-2
 - Disable redis plugin on RHEL 6, hiredis has been retired from EPEL6
