@@ -835,12 +835,18 @@ AC_CHECK_HEADERS(sys/capability.h,
                  [have_capability="yes"],
                  [have_capability="no (<sys/capability.h> not found)"])
 if test "x$have_capability" = "xyes"; then
-AC_CHECK_LIB(cap, cap_get_bound,
+AC_CHECK_LIB(cap, cap_get_proc,
                  [have_capability="yes"],
-                 [have_capability="no (cap_get_bound() not found)"])
+                 [have_capability="no (cap_get_proc() not found)"])
 fi
 if test "x$have_capability" = "xyes"; then
-  AC_DEFINE(HAVE_CAPABILITY, 1, [Define to 1 if you have cap_get_bound() (-lcap).])
+AC_CHECK_DECL([CAP_IS_SUPPORTED],
+                 [have_capability="yes"],
+                 [have_capability="no (CAP_IS_SUPPORTED not found)"],
+                 [[#include <sys/capability.h>]])
+fi
+if test "x$have_capability" = "xyes"; then
+  AC_DEFINE(HAVE_CAPABILITY, 1, [Define to 1 if you have cap_get_proc() (-lcap).])
 fi
 AM_CONDITIONAL(BUILD_WITH_CAPABILITY, test "x$have_capability" = "xyes")
 
@@ -1061,6 +1067,92 @@ then
 	CFLAGS="$SAVE_CFLAGS"
 fi
 # }}} Check for strptime
+
+# Check for timegm {{{
+
+# These checks need -Werror because implicit function declarations are only a
+# warning ...
+SAVE_CFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS -Werror"
+
+AC_CACHE_CHECK([for timegm],
+  [c_cv_have_timegm],
+  AC_LINK_IFELSE(
+    [AC_LANG_PROGRAM(
+[[[
+#if STRPTIME_NEEDS_STANDARDS
+# ifndef _ISOC99_SOURCE
+#  define _ISOC99_SOURCE 1
+# endif
+# ifndef _POSIX_C_SOURCE
+#  define _POSIX_C_SOURCE 200112L
+# endif
+# ifndef _XOPEN_SOURCE
+#  define _XOPEN_SOURCE 500
+# endif
+#endif
+#include <time.h>
+]]],
+[[[
+ time_t t = timegm(&(struct tm){0});
+ if (t == ((time_t) -1)) {
+   return 1;
+ }
+]]]
+    )],
+    [c_cv_have_timegm="yes"],
+    [c_cv_have_timegm="no"]
+  )
+)
+
+if test "x$c_cv_have_timegm" != "xyes"
+then
+  AC_CACHE_CHECK([for timegm with _BSD_SOURCE],
+    [c_cv_have_timegm_bsd],
+    AC_LINK_IFELSE(
+      [AC_LANG_PROGRAM(
+[[[
+#if STRPTIME_NEEDS_STANDARDS
+# ifndef _ISOC99_SOURCE
+#  define _ISOC99_SOURCE 1
+# endif
+# ifndef _POSIX_C_SOURCE
+#  define _POSIX_C_SOURCE 200112L
+# endif
+# ifndef _XOPEN_SOURCE
+#  define _XOPEN_SOURCE 500
+# endif
+#endif
+#ifndef _BSD_SOURCE
+# define _BSD_SOURCE 1
+#endif
+#include <time.h>
+]]],
+[[[
+ time_t t = timegm(&(struct tm){0});
+ if (t == ((time_t) -1)) {
+   return 1;
+ }
+]]]
+      )],
+      [c_cv_have_timegm_bsd="yes"
+       c_cv_have_timegm="yes"],
+      [c_cv_have_timegm_bsd="no"]
+    )
+  )
+fi
+
+if test "x$c_cv_have_timegm" = "xyes"
+then
+  AC_DEFINE(HAVE_TIMEGM, 1, [Define if the timegm(3) function is available.])
+  if test "x$c_cv_have_timegm_bsd" = "xyes"
+  then
+    AC_DEFINE(TIMEGM_NEEDS_BSD, 1, [Set to true if timegm is only exported in BSD mode.])
+  fi
+fi
+
+CFLAGS="$SAVE_CFLAGS"
+# }}} Check for timegm
 
 AC_CHECK_FUNCS(swapctl, [have_swapctl="yes"], [have_swapctl="no"])
 if test "x$have_swapctl" = "xyes"; then

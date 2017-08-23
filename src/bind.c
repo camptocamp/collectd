@@ -35,10 +35,18 @@
 #endif
 #endif /* STRPTIME_NEEDS_STANDARDS */
 
+#if TIMEGM_NEEDS_BSD
+#ifndef _BSD_SOURCE
+#define _BSD_SOURCE 1
+#endif
+#endif /* TIMEGM_NEEDS_BSD */
+
 #include "collectd.h"
 
 #include "common.h"
 #include "plugin.h"
+
+#include <time.h>
 
 /* Some versions of libcurl don't include this themselves and then don't have
  * fd_set available. */
@@ -429,7 +437,28 @@ static int bind_xml_read_timestamp(const char *xpath_expression, /* {{{ */
     return (-1);
   }
 
-  *ret_value = mktime(&tm);
+#if HAVE_TIMEGM
+  time_t t = timegm(&tm);
+  if (t == ((time_t)-1)) {
+    char errbuf[1024];
+    ERROR("bind plugin: timegm() failed: %s",
+          sstrerror(errno, errbuf, sizeof(errbuf)));
+    return (-1);
+  }
+  *ret_value = t;
+#else
+  time_t t = mktime(&tm);
+  if (t == ((time_t)-1)) {
+    char errbuf[1024];
+    ERROR("bind plugin: mktime() failed: %s",
+          sstrerror(errno, errbuf, sizeof(errbuf)));
+    return (-1);
+  }
+  /* mktime assumes that tm is local time. Luckily, it also sets timezone to
+   * the offset used for the conversion, and we undo the conversion to convert
+   * back to UTC. */
+  *ret_value = t - timezone;
+#endif
 
   xmlXPathFreeObject(xpathObj);
   return (0);
@@ -493,8 +522,10 @@ static int bind_parse_generic_name_value(const char *xpath_expression, /* {{{ */
         status = bind_xml_read_gauge(doc, counter, &value.gauge);
       else
         status = bind_xml_read_derive(doc, counter, &value.derive);
-      if (status != 0)
+      if (status != 0) {
+        xmlFree(name);
         continue;
+      }
 
       status = (*list_callback)(name, value, current_time, user_data);
       if (status == 0)
@@ -626,12 +657,16 @@ static int bind_parse_generic_name_attr_value_list(
         status = bind_xml_read_gauge(doc, child, &value.gauge);
       else
         status = bind_xml_read_derive(doc, child, &value.derive);
-      if (status != 0)
+      if (status != 0) {
+        xmlFree(attr_name);
         continue;
+      }
 
       status = (*list_callback)(attr_name, value, current_time, user_data);
       if (status == 0)
         num_entries++;
+
+      xmlFree(attr_name);
     }
   }
 
@@ -1563,7 +1598,6 @@ static int bind_init(void) /* {{{ */
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, bind_curl_callback);
   curl_easy_setopt(curl, CURLOPT_USERAGENT, COLLECTD_USERAGENT);
   curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, bind_curl_error);
-  curl_easy_setopt(curl, CURLOPT_URL, (url != NULL) ? url : BIND_DEFAULT_URL);
   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
   curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 50L);
 #ifdef HAVE_CURLOPT_TIMEOUT_MS
@@ -1585,6 +1619,9 @@ static int bind_read(void) /* {{{ */
   }
 
   bind_buffer_fill = 0;
+
+  curl_easy_setopt(curl, CURLOPT_URL, (url != NULL) ? url : BIND_DEFAULT_URL);
+
   if (curl_easy_perform(curl) != CURLE_OK) {
     ERROR("bind plugin: curl_easy_perform failed: %s", bind_curl_error);
     return (-1);
