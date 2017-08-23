@@ -2598,7 +2598,7 @@ fi
 - Added custom patches:
   * #1989 open files count
   * contrib-docker LD_PRELOAD wrapper
-  * #2138 log to stderr by default
+  * #2189 ntpd: Correct loop offset and error calculation
 
 * Sun Mar 05 2017 Ruben Kerkhof <ruben@rubenkerkhof.com> - 5.7.1-2
 - Don't enable XFS support on RHEL6, it is missing for i386
